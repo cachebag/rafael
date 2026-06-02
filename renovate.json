@@ -1,0 +1,33 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "dependencyDashboard": true,
+  "labels": ["dependencies"],
+  "ignorePaths": ["**/target/**"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"]
+  },
+  "packageRules": [
+    {
+      "description": "Keep direct Cargo dependency constraints current instead of only updating Cargo.lock.",
+      "matchManagers": ["cargo"],
+      "rangeStrategy": "bump"
+    },
+    {
+      "description": "Group compatible Rust dependency updates across the workspace.",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Rust minor and patch dependencies",
+      "groupSlug": "rust-minor-patch"
+    },
+    {
+      "description": "Require explicit approval for Rust major version upgrades from the dependency dashboard.",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    }
+  ]
+}
