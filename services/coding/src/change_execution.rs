@@ -301,25 +301,43 @@ async fn repeated_action_result(
     sandbox: &RepoSandbox,
     limits: &ExecutionLimits,
 ) -> anyhow::Result<ActionResult> {
-    let message = match action {
+    let (status, message) = match action {
         ChangeAction::ReadFile { .. } => {
-            "same read_file action was just attempted. The file content is included again below; use it now, or use read_file_range/search for a specific symbol before choosing an edit_file/write_file/done action.".to_owned()
+            (
+                RepeatedActionStatus::Ok,
+                "same read_file action was just attempted. The file content is included again below; do not read this same file again. Use this content, use read_file_range/search for a different target, or choose an edit_file/write_file/done action.".to_owned(),
+            )
         }
         ChangeAction::ReadFileRange { .. } => {
-            "same read_file_range action was just attempted. The requested line range is included again below; use it now, or choose a different range/search/edit action.".to_owned()
+            (
+                RepeatedActionStatus::Ok,
+                "same read_file_range action was just attempted. The requested line range is included again below; do not read this same range again. Use it now, or choose a different range/search/edit action.".to_owned(),
+            )
         }
         ChangeAction::Search { .. } => {
-            "same search action was just attempted; use the prior matches and choose a different action".to_owned()
+            (
+                RepeatedActionStatus::Ok,
+                "same search action was just attempted; do not repeat this same search. Use the prior matches and choose a different action.".to_owned(),
+            )
         }
         ChangeAction::WriteFile { .. } | ChangeAction::EditFile { .. } => {
-            "same write/edit action was just attempted. If the previous result was ok, that change is already applied; do not repeat it. Inspect the current file content below, address the next requested feedback item, or return done only after all feedback is complete.".to_owned()
+            (
+                RepeatedActionStatus::Error,
+                "same write/edit action was just attempted. If the previous result was ok, that change is already applied; do not repeat it. Inspect the current file content below, address the next requested feedback item, or return done only after all feedback is complete.".to_owned(),
+            )
         }
         ChangeAction::Done { .. } => {
-            "same done action was just attempted; choose a different action only if more work remains".to_owned()
+            (
+                RepeatedActionStatus::Error,
+                "same done action was just attempted; choose a different action only if more work remains".to_owned(),
+            )
         }
     };
 
-    let mut result = ActionResult::error(message);
+    let mut result = match status {
+        RepeatedActionStatus::Ok => ActionResult::ok(message),
+        RepeatedActionStatus::Error => ActionResult::error(message),
+    };
 
     if let Some((content, bytes)) = action_file_content_for_prompt(action, sandbox, limits).await {
         result = result.with_content(content, bytes);
@@ -832,7 +850,7 @@ fn build_action_prompt(
         .context("failed to serialize change execution history")?;
 
     Ok(format!(
-        "Repository: {}\nDefault branch: {}\nTarget branch: {}\nIssue #{}: {}\nLabels: {}\nIssue body:\n{}\n\nImplementation plan:\n{}\n\nRepository context JSON:\n{}\n\nPrior tool history JSON:\n{}\n\nYou are editing the prepared local branch through a bounded tool loop. Choose exactly one next action and return exactly one JSON object with no Markdown, comments, or extra text. Available actions:\n- {{\"action\":\"read_file\",\"path\":\"relative/path\"}}\n- {{\"action\":\"read_file_range\",\"path\":\"relative/path\",\"start_line\":1,\"end_line\":80}}\n- {{\"action\":\"search\",\"query\":\"case-insensitive literal text\",\"path\":\"optional/relative/scope\"}}\n- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"complete file contents\"}}\n- {{\"action\":\"edit_file\",\"path\":\"relative/path\",\"old_text\":\"exact text appearing once\",\"new_text\":\"replacement text\"}}\n- {{\"action\":\"done\",\"status\":\"completed\",\"summary\":\"what changed\"}}\n- {{\"action\":\"done\",\"status\":\"blocked\",\"summary\":\"why blocked\",\"question\":\"what you need clarified\"}}\n\nConstraints:\n- Paths must be repository-relative, inside the checkout, and must not use .git, parent traversal, absolute paths, or known secret files.\n- Do not request shell commands, commits, pushes, branch changes, package installs, or network calls.\n- Keep changes minimal and focused on the issue. Prefer search/read_file_range for large files or known symbols; use read_file only for small files.\n- Treat trusted review feedback in the implementation plan as a checklist. After a successful write/edit, move to the next unaddressed feedback item. Do not repeat the same edit.\n- If old_text no longer matches, the file may already be changed; use the current file content from tool history, read the file, or choose the next file.\n- Return done with status completed only after every requested feedback item is addressed.\n- write_file content must be at most {} bytes; whole-file reads are capped at {} bytes; range reads are capped at {} lines; the run may change at most {} files.\n- If the requested change cannot be completed safely with these actions, return done with status blocked.",
+        "Repository: {}\nDefault branch: {}\nTarget branch: {}\nIssue #{}: {}\nLabels: {}\nIssue body:\n{}\n\nImplementation plan:\n{}\n\nRepository context JSON:\n{}\n\nPrior tool history JSON:\n{}\n\nYou are editing the prepared local branch through a bounded tool loop. Choose exactly one next action and return exactly one JSON object with no Markdown, comments, or extra text. Available actions:\n- {{\"action\":\"read_file\",\"path\":\"relative/path\"}}\n- {{\"action\":\"read_file_range\",\"path\":\"relative/path\",\"start_line\":1,\"end_line\":80}}\n- {{\"action\":\"search\",\"query\":\"case-insensitive literal text\",\"path\":\"optional/relative/scope\"}}\n- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"complete file contents\"}}\n- {{\"action\":\"edit_file\",\"path\":\"relative/path\",\"old_text\":\"exact text appearing once\",\"new_text\":\"replacement text\"}}\n- {{\"action\":\"done\",\"status\":\"completed\",\"summary\":\"what changed\"}}\n- {{\"action\":\"done\",\"status\":\"blocked\",\"summary\":\"why blocked\",\"question\":\"what you need clarified\"}}\n\nConstraints:\n- Paths must be repository-relative, inside the checkout, and must not use .git, parent traversal, absolute paths, or known secret files.\n- Do not request shell commands, commits, pushes, branch changes, package installs, or network calls.\n- Keep changes minimal and focused on the issue. Prefer search/read_file_range for large files or known symbols; use read_file only for small files.\n- Never repeat an identical read_file, read_file_range, or search action after the prior result was ok. Use the returned content/matches, choose a different range/search, edit a file, or finish.\n- Treat trusted review feedback in the implementation plan as a checklist. After a successful write/edit, move to the next unaddressed feedback item. Do not repeat the same edit.\n- If old_text no longer matches, the file may already be changed; use the current file content from tool history, read the file, or choose the next file.\n- Return done with status completed only after every requested feedback item is addressed.\n- write_file content must be at most {} bytes; whole-file reads are capped at {} bytes; range reads are capped at {} lines; the run may change at most {} files.\n- If the requested change cannot be completed safely with these actions, return done with status blocked.",
         repo.full_name,
         repo.default_branch,
         branch_name,
@@ -1505,6 +1523,12 @@ enum ActionResultStatus {
     Ok,
     Error,
     Unsafe,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RepeatedActionStatus {
+    Ok,
+    Error,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
