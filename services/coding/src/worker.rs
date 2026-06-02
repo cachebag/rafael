@@ -179,8 +179,16 @@ async fn run_issue_triggered_inner(config: AppConfig, trigger: IssueTrigger) -> 
     state.default_branch = Some(repo.default_branch.clone());
 
     let branch_name = branch_name_for_issue(&issue);
-    let worktree_path =
-        prepare_worktree(&config, &token, &trigger.repo, &repo, &branch_name).await?;
+    let worktree_path = prepare_worktree(
+        &config,
+        &token,
+        &trigger.repo,
+        &repo,
+        trigger.issue_number,
+        &trigger.run_id,
+        &branch_name,
+    )
+    .await?;
 
     state.status = RunStatus::Prepared;
     state.branch_name = Some(branch_name.clone());
@@ -633,7 +641,7 @@ fn verification_passed_comment(
     summary: &str,
 ) -> String {
     format!(
-        "Prepared branch `{branch_name}`, completed bounded local code changes, and verification passed.\n\nChanged files:\n{}\n\nVerification:\n{summary}\n\nNo commit, push, or PR creation was performed in this slice.",
+        "Prepared branch `{branch_name}`, completed bounded local code changes, and verification passed.\n\nChanged files:\n{}\n\nVerification:\n{summary}\n\nPublishing will continue automatically.",
         changed_files_list(changed_files)
     )
 }
@@ -644,14 +652,14 @@ fn verification_passed_after_repair_comment(
     summary: &str,
 ) -> String {
     format!(
-        "Prepared branch `{branch_name}`, repaired verification failures once, and verification passed on rerun.\n\nChanged files:\n{}\n\nVerification rerun:\n{summary}\n\nNo commit, push, or PR creation was performed in this slice.",
+        "Prepared branch `{branch_name}`, repaired verification failures once, and verification passed on rerun.\n\nChanged files:\n{}\n\nVerification rerun:\n{summary}\n\nPublishing will continue automatically.",
         changed_files_list(changed_files)
     )
 }
 
 fn verification_skipped_comment(branch_name: &str, changed_files: &[String]) -> String {
     format!(
-        "Prepared branch `{branch_name}` and completed bounded local code changes.\n\nChanged files:\n{}\n\nVerification was skipped because no commands were selected. No commit, push, or PR creation was performed in this slice.",
+        "Prepared branch `{branch_name}` and completed bounded local code changes.\n\nChanged files:\n{}\n\nVerification was skipped because no commands were selected. Publishing is disabled unless unverified publishing is explicitly allowed.",
         changed_files_list(changed_files)
     )
 }
@@ -723,7 +731,7 @@ fn run_dir(config: &AppConfig, trigger: &IssueTrigger) -> PathBuf {
         .runs_dir
         .join(trigger.repo.safe_dir_name())
         .join(format!("issue-{}", trigger.issue_number))
-        .join(&trigger.run_id)
+        .join(safe_path_component(&trigger.run_id))
 }
 
 async fn write_state(run_dir: &std::path::Path, state: &RunState) -> anyhow::Result<()> {
@@ -739,12 +747,17 @@ async fn prepare_worktree(
     token: &InstallationToken,
     repo: &RepoRef,
     repo_info: &RepositoryInfo,
+    issue_number: u64,
+    run_id: &str,
     branch_name: &str,
 ) -> anyhow::Result<PathBuf> {
-    let repo_dir = config.workspace.workdir.join(repo.safe_dir_name());
-    tokio::fs::create_dir_all(&config.workspace.workdir)
+    let repo_dir = isolated_checkout_path(config, repo, issue_number, run_id);
+    let parent = repo_dir
+        .parent()
+        .context("isolated checkout path must have a parent directory")?;
+    tokio::fs::create_dir_all(parent)
         .await
-        .with_context(|| format!("failed to create {}", config.workspace.workdir.display()))?;
+        .with_context(|| format!("failed to create {}", parent.display()))?;
 
     if !repo_dir.starts_with(&config.workspace.workdir) {
         bail!("computed repo workdir escaped configured workdir");
@@ -779,6 +792,21 @@ async fn prepare_worktree(
     .await?;
 
     Ok(repo_dir)
+}
+
+fn isolated_checkout_path(
+    config: &AppConfig,
+    repo: &RepoRef,
+    issue_number: u64,
+    run_id: &str,
+) -> PathBuf {
+    config
+        .workspace
+        .workdir
+        .join(repo.safe_dir_name())
+        .join(format!("issue-{issue_number}"))
+        .join(safe_path_component(run_id))
+        .join("checkout")
 }
 
 async fn run_git_clone(
@@ -847,7 +875,7 @@ fn git_auth_header(token: &str) -> String {
 fn branch_name_for_issue(issue: &IssueInfo) -> String {
     let change_type = change_type_for_issue(issue);
     let slug = slugify(&issue.title);
-    format!("{change_type}/{slug}")
+    format!("{change_type}/issue-{}-{slug}", issue.number)
 }
 
 fn change_type_for_issue(issue: &IssueInfo) -> &'static str {
@@ -904,6 +932,32 @@ fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
+fn safe_path_component(value: &str) -> String {
+    let mut safe = String::new();
+    let mut last_was_dash = false;
+
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            safe.push(ch);
+            last_was_dash = false;
+        } else if !last_was_dash && !safe.is_empty() {
+            safe.push('-');
+            last_was_dash = true;
+        }
+
+        if safe.len() >= 96 {
+            break;
+        }
+    }
+
+    let safe = safe.trim_matches('-');
+    if safe.is_empty() {
+        "run".to_owned()
+    } else {
+        safe.to_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -925,12 +979,17 @@ mod tests {
 
         assert_eq!(
             branch_name_for_issue(&issue),
-            "feat/add-github-app-webhook-receiver"
+            "feat/issue-12-add-github-app-webhook-receiver"
         );
     }
 
     #[test]
     fn slugify_falls_back_for_empty_title() {
         assert_eq!(slugify("?!"), "issue");
+    }
+
+    #[test]
+    fn safe_path_component_strips_separators() {
+        assert_eq!(safe_path_component("../abc/def"), "abc-def");
     }
 }
