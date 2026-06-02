@@ -545,9 +545,12 @@ async fn search_action(
     let files = git_ls_files(&sandbox.checkout_path).await?;
     let query_lower = query.to_ascii_lowercase();
     let mut matches = Vec::new();
+    let max_candidates = limits
+        .max_search_results
+        .saturating_mul(SEARCH_MATCH_CANDIDATE_MULTIPLIER);
 
     for file in files {
-        if matches.len() >= limits.max_search_results {
+        if matches.len() >= max_candidates {
             break;
         }
         if !scope.contains(&file) {
@@ -582,20 +585,27 @@ async fn search_action(
 
         for (line_index, line) in content.lines().enumerate() {
             if line.to_ascii_lowercase().contains(&query_lower) {
+                let line_number = line_index + 1;
+                let (read_start_line, read_end_line) = suggested_read_range(line_number);
                 matches.push(SearchMatch {
                     path: file.clone(),
-                    line: line_index + 1,
+                    line: line_number,
                     preview: truncate_text(line.trim(), MAX_SEARCH_PREVIEW_CHARS),
+                    read_start_line,
+                    read_end_line,
                 });
-                if matches.len() >= limits.max_search_results {
+                if matches.len() >= max_candidates {
                     break;
                 }
             }
         }
     }
 
+    matches.sort_by(|left, right| search_match_rank(left).cmp(&search_match_rank(right)));
+    matches.truncate(limits.max_search_results);
+
     let result = ActionResult::ok(format!(
-        "found {} match(es) for literal query `{query}`",
+        "found {} match(es) for literal query `{query}`. To inspect a match, call read_file_range with that match's path, read_start_line, and read_end_line.",
         matches.len()
     ))
     .with_matches(matches);
@@ -1242,6 +1252,33 @@ fn truncate_text(value: &str, max_chars: usize) -> String {
     truncated
 }
 
+fn suggested_read_range(line_number: usize) -> (usize, usize) {
+    (
+        line_number.saturating_sub(20).max(1),
+        line_number.saturating_add(80),
+    )
+}
+
+fn search_match_rank(search_match: &SearchMatch) -> (u8, &str, usize) {
+    let preview = search_match.preview.trim_start();
+    let rank = if preview.starts_with("fn ")
+        || preview.starts_with("async fn ")
+        || preview.starts_with("pub fn ")
+        || preview.starts_with("pub async fn ")
+        || preview.starts_with("struct ")
+        || preview.starts_with("pub struct ")
+        || preview.starts_with("enum ")
+        || preview.starts_with("pub enum ")
+        || preview.starts_with("impl ")
+    {
+        0
+    } else {
+        1
+    };
+
+    (rank, search_match.path.as_str(), search_match.line)
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 struct ExecutionLimits {
     max_iterations: usize,
@@ -1536,6 +1573,8 @@ struct SearchMatch {
     path: String,
     line: usize,
     preview: String,
+    read_start_line: usize,
+    read_end_line: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1598,6 +1637,7 @@ fn should_finish_after_repeated_write_edit(
 
 const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
 const MAX_SEARCH_RESULTS: usize = 40;
+const SEARCH_MATCH_CANDIDATE_MULTIPLIER: usize = 4;
 const MAX_SEARCH_PREVIEW_CHARS: usize = 240;
 const MAX_RANGE_READ_LINES: usize = 160;
 const MAX_HISTORY_ACTION_TEXT_CHARS: usize = 2_000;
@@ -1716,6 +1756,36 @@ mod tests {
         let range = format_line_range(content, 1, 4, 2).unwrap();
 
         assert_eq!(range, "1: one\n2: two\n...[range truncated]");
+    }
+
+    #[test]
+    fn suggested_read_ranges_include_context_before_match() {
+        assert_eq!(suggested_read_range(10), (1, 90));
+        assert_eq!(suggested_read_range(299), (279, 379));
+    }
+
+    #[test]
+    fn search_match_rank_prefers_definitions() {
+        let mut matches = [
+            SearchMatch {
+                path: "src/main.rs".to_owned(),
+                line: 20,
+                preview: "let result = repeated_action_result();".to_owned(),
+                read_start_line: 1,
+                read_end_line: 100,
+            },
+            SearchMatch {
+                path: "src/main.rs".to_owned(),
+                line: 299,
+                preview: "async fn repeated_action_result(".to_owned(),
+                read_start_line: 279,
+                read_end_line: 379,
+            },
+        ];
+
+        matches.sort_by(|left, right| search_match_rank(left).cmp(&search_match_rank(right)));
+
+        assert_eq!(matches[0].line, 299);
     }
 
     #[test]
