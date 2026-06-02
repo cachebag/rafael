@@ -89,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
                 verification_command_timeout_seconds = config.workspace.verification_command_timeout_seconds,
                 verification_total_timeout_seconds = config.workspace.verification_total_timeout_seconds,
                 allow_unverified_publish = config.workspace.allow_unverified_publish,
+                quiet_comments = config.github.quiet_comments,
                 "configuration loaded"
             );
             Ok(())

@@ -278,6 +278,12 @@ fn evaluate_pull_request_review_comment_event(
         return ignored("ignored pull request from a different head repository");
     }
 
+    if !contains_revision_command(&event.comment.body, &config.github.command_mention) {
+        return ignored(
+            "ignored pull request review comment without collaborator revision command",
+        );
+    }
+
     Ok(WebhookDecision::AcceptedPullRequestRevision(
         PullRequestRevisionTrigger {
             repo,
@@ -383,6 +389,7 @@ struct PullRequestReviewEvent {
 #[derive(Debug, Deserialize)]
 struct PullRequestReviewCommentEvent {
     action: String,
+    comment: CommentPayload,
     pull_request: PullRequestPayload,
     repository: RepositoryPayload,
     installation: Option<InstallationPayload>,
@@ -478,6 +485,7 @@ mod tests {
                 trusted_users: vec!["cachebag".to_owned()],
                 blocking_labels: vec!["blocked".to_owned()],
                 enable_assignment_trigger: false,
+                quiet_comments: false,
                 api_base_url: "https://api.github.com".to_owned(),
                 git_author_name: "netshared[bot]".to_owned(),
                 git_author_email: "1+netshared[bot]@users.noreply.github.com".to_owned(),
@@ -684,9 +692,49 @@ mod tests {
     }
 
     #[test]
-    fn accepts_trusted_pull_request_review_comment() {
+    fn ignores_pull_request_review_comment_without_revision_command() {
         let body = br#"{
             "action": "created",
+            "comment": {"body":"This should be adjusted."},
+            "pull_request": {
+                "number": 11,
+                "state": "open",
+                "head": {
+                    "ref": "work/issue-10-services-coding-operations-setup",
+                    "repo": {"full_name": "cachebag/rafael"}
+                }
+            },
+            "repository": {
+                "name": "rafael",
+                "default_branch": "master",
+                "owner": {"login":"cachebag"}
+            },
+            "installation": {"id": 42},
+            "sender": {"login":"cachebag"}
+        }"#;
+
+        let decision = evaluate_event(
+            &test_config(),
+            "pull_request_review_comment",
+            "delivery-5",
+            body,
+        )
+        .unwrap();
+        match decision {
+            WebhookDecision::AcceptedIssue(_) | WebhookDecision::AcceptedPullRequestRevision(_) => {
+                panic!("unexpected accept")
+            }
+            WebhookDecision::Ignored { reason } => {
+                assert!(reason.contains("revision command"));
+            }
+        }
+    }
+
+    #[test]
+    fn accepts_trusted_pull_request_review_comment_revision_command() {
+        let body = br#"{
+            "action": "created",
+            "comment": {"body":"@netshared revise\n\nPlease apply this inline feedback."},
             "pull_request": {
                 "number": 11,
                 "state": "open",

@@ -655,6 +655,7 @@ mod tests {
                 trusted_users: vec!["cachebag".to_owned()],
                 blocking_labels: vec!["blocked".to_owned()],
                 enable_assignment_trigger: false,
+                quiet_comments: false,
                 api_base_url: "https://api.github.com".to_owned(),
                 git_author_name: "netshared[bot]".to_owned(),
                 git_author_email: "1+netshared[bot]@users.noreply.github.com".to_owned(),
