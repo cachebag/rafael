@@ -137,6 +137,28 @@ pub async fn execute_change_loop(
         append_transcript(&transcript_path, iteration, "action", &action).await?;
 
         let prompt_action = action.for_prompt();
+        let repeat_count = consecutive_action_repetitions(&history, &prompt_action);
+        if repeat_count >= MAX_CONSECUTIVE_IDENTICAL_ACTIONS {
+            return finish_outcome(
+                ChangeExecutionStatus::Blocked,
+                "model repeated the same action without making progress".to_owned(),
+                Some("Please clarify the requested change or provide more specific implementation details.".to_owned()),
+                iteration,
+                &transcript_path,
+                &diff_stat_path,
+                &sandbox,
+            )
+            .await;
+        }
+        if repeat_count > 0 && action.is_observation() {
+            let result = ActionResult::error(
+                "same read/search action was just attempted; use the prior result and choose a different action".to_owned(),
+            );
+            append_transcript(&transcript_path, iteration, "result", &result).await?;
+            history.push(prompt_history_entry(iteration, prompt_action, &result));
+            continue;
+        }
+
         let execution =
             execute_action(&action, &sandbox, run_dir, &diff_stat_path, &limits).await?;
 
@@ -607,8 +629,8 @@ fn build_action_prompt(
         .join(", ");
     let context_json = serde_json::to_string(repo_context)
         .context("failed to serialize repository context for change prompt")?;
-    let history_json =
-        serde_json::to_string(history).context("failed to serialize change execution history")?;
+    let history_json = serde_json::to_string(&prompt_history_tail(history))
+        .context("failed to serialize change execution history")?;
 
     Ok(format!(
         "Repository: {}\nDefault branch: {}\nTarget branch: {}\nIssue #{}: {}\nLabels: {}\nIssue body:\n{}\n\nImplementation plan:\n{}\n\nRepository context JSON:\n{}\n\nPrior tool history JSON:\n{}\n\nYou are editing the prepared local branch through a bounded tool loop. Choose exactly one next action and return exactly one JSON object with no Markdown, comments, or extra text. Available actions:\n- {{\"action\":\"read_file\",\"path\":\"relative/path\"}}\n- {{\"action\":\"search\",\"query\":\"case-insensitive literal text\",\"path\":\"optional/relative/scope\"}}\n- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"complete file contents\"}}\n- {{\"action\":\"edit_file\",\"path\":\"relative/path\",\"old_text\":\"exact text appearing once\",\"new_text\":\"replacement text\"}}\n- {{\"action\":\"done\",\"status\":\"completed\",\"summary\":\"what changed\"}}\n- {{\"action\":\"done\",\"status\":\"blocked\",\"summary\":\"why blocked\",\"question\":\"what you need clarified\"}}\n\nConstraints:\n- Paths must be repository-relative, inside the checkout, and must not use .git, parent traversal, absolute paths, or known secret files.\n- Do not request shell commands, commits, pushes, branch changes, package installs, or network calls.\n- Keep changes minimal and focused on the issue. Prefer read_file/search before edits when context is missing.\n- write_file content must be at most {} bytes; reads are capped at {} bytes; the run may change at most {} files.\n- If the requested change cannot be completed safely with these actions, return done with status blocked.",
@@ -1113,6 +1135,10 @@ impl ChangeAction {
             }),
         }
     }
+
+    fn is_observation(&self) -> bool {
+        matches!(self, Self::ReadFile { .. } | Self::Search { .. })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -1263,11 +1289,32 @@ struct PromptHistoryEntry {
     result: serde_json::Value,
 }
 
+fn prompt_history_tail(history: &[PromptHistoryEntry]) -> &[PromptHistoryEntry] {
+    if history.len() <= MAX_PROMPT_HISTORY_ENTRIES {
+        history
+    } else {
+        &history[history.len() - MAX_PROMPT_HISTORY_ENTRIES..]
+    }
+}
+
+fn consecutive_action_repetitions(
+    history: &[PromptHistoryEntry],
+    action: &serde_json::Value,
+) -> usize {
+    history
+        .iter()
+        .rev()
+        .take_while(|entry| entry.action == *action)
+        .count()
+}
+
 const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
 const MAX_SEARCH_RESULTS: usize = 40;
 const MAX_SEARCH_PREVIEW_CHARS: usize = 240;
 const MAX_HISTORY_ACTION_TEXT_CHARS: usize = 2_000;
-const MAX_HISTORY_VALUE_CHARS: usize = 48_000;
+const MAX_HISTORY_VALUE_CHARS: usize = 4_000;
+const MAX_PROMPT_HISTORY_ENTRIES: usize = 8;
+const MAX_CONSECUTIVE_IDENTICAL_ACTIONS: usize = 3;
 const PATH_ESCAPES_REPOSITORY_CHECKOUT: &str = "path escapes repository checkout";
 
 #[cfg(test)]
@@ -1301,5 +1348,46 @@ mod tests {
         assert!(sanitize_repo_path("/tmp/file").is_err());
         assert!(sanitize_repo_path(".env").is_err());
         assert!(sanitize_repo_path("src/main.rs").is_ok());
+    }
+
+    #[test]
+    fn prompt_history_tail_keeps_recent_entries() {
+        let history = (1..=10)
+            .map(|iteration| PromptHistoryEntry {
+                iteration,
+                action: serde_json::json!({"action":"read_file","path":iteration.to_string()}),
+                result: serde_json::json!({"status":"ok"}),
+            })
+            .collect::<Vec<_>>();
+
+        let tail = prompt_history_tail(&history);
+
+        assert_eq!(tail.len(), MAX_PROMPT_HISTORY_ENTRIES);
+        assert_eq!(tail.first().unwrap().iteration, 3);
+        assert_eq!(tail.last().unwrap().iteration, 10);
+    }
+
+    #[test]
+    fn repeated_action_count_is_consecutive_only() {
+        let repeated = serde_json::json!({"action":"read_file","path":"README.md"});
+        let history = vec![
+            PromptHistoryEntry {
+                iteration: 1,
+                action: repeated.clone(),
+                result: serde_json::json!({"status":"ok"}),
+            },
+            PromptHistoryEntry {
+                iteration: 2,
+                action: serde_json::json!({"action":"read_file","path":"Cargo.toml"}),
+                result: serde_json::json!({"status":"ok"}),
+            },
+            PromptHistoryEntry {
+                iteration: 3,
+                action: repeated.clone(),
+                result: serde_json::json!({"status":"ok"}),
+            },
+        ];
+
+        assert_eq!(consecutive_action_repetitions(&history, &repeated), 1);
     }
 }
