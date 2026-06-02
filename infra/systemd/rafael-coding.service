@@ -4,10 +4,18 @@ After=network.target
 
 [Service]
 Type=simple
-User=cachebag
+WorkingDirectory=/home/cachebag/rafael
 ExecStart=/home/cachebag/rafael/target/release/coding serve
 EnvironmentFile=/home/cachebag/.config/rafael/coding.env
-Restart=on-failure
+Restart=always
+RestartSec=5
+
+# Copy or symlink the unit into ~/.config/systemd/user/
+# systemctl --user daemon-reload
+# systemctl --user enable --now rafael-coding
+# journalctl --user -u rafael-coding -f
+
+# The webhook remains exposed through Tailscale Funnel
 
 [Install]
 WantedBy=default.target
