@@ -26,3 +26,32 @@ infra/systemd/llama-server.service
 
 # License 
 MIT 
+
+## Systemd Service Management
+
+To manage the `rafael-coding.service`, use the following commands:
+
+- **Enable the service to start on boot:**
+  ```
+  systemctl --user enable rafael-coding.service
+  ```
+
+- **Start the service:**
+  ```
+  systemctl --user start rafael-coding.service
+  ```
+
+- **Restart the service:**
+  ```
+  systemctl --user restart rafael-coding.service
+  ```
+
+- **View the service status:**
+  ```
+  systemctl --user status rafael-coding.service
+  ```
+
+- **View the service logs:**
+  ```
+  journalctl --user -u rafael-coding.service
+  ```
