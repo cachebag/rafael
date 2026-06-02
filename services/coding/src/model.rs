@@ -33,14 +33,14 @@ impl ModelClient {
         branch_name: &str,
         context: &RepoContext,
     ) -> anyhow::Result<String> {
-        let body = issue.body.as_deref().unwrap_or("(no issue body)");
+        let body = context.issue.body.as_deref().unwrap_or("(no issue body)");
         let labels = issue
             .labels
             .iter()
             .map(|label| label.name.as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        let context_json = serde_json::to_string_pretty(context)
+        let context_json = serde_json::to_string(context)
             .context("failed to serialize repository context for model prompt")?;
 
         let prompt = format!(

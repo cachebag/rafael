@@ -77,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
                 mention = %config.github.command_mention,
                 bind = %config.server.bind,
                 max_run_minutes = config.workspace.max_run_minutes,
-                verify_commands = ?config.workspace.verify_commands,
+                verify_commands_count = config.workspace.verify_commands.len(),
                 "configuration loaded"
             );
             Ok(())

@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeSet, HashSet},
-    path::{Component, Path, PathBuf},
+    path::{Component, Path},
     process::Stdio,
     time::Duration,
 };
@@ -34,12 +34,11 @@ pub async fn collect_repository_context(
             full_name: repo.full_name.clone(),
             default_branch: repo.default_branch.clone(),
             html_url: repo.html_url.clone(),
-            checkout_path: checkout_path.to_path_buf(),
         },
         issue: RepoContextIssue {
             number: issue.number,
             title: issue.title.clone(),
-            body: issue.body.clone(),
+            body: truncate_optional_text(issue.body.as_deref(), MAX_ISSUE_BODY_CHARS),
             html_url: issue.html_url.clone(),
             labels: issue
                 .labels
@@ -52,7 +51,7 @@ pub async fn collect_repository_context(
                 .map(|comment| RepoContextIssueComment {
                     id: comment.id,
                     author: comment.user.login.clone(),
-                    body: comment.body.clone(),
+                    body: truncate_text(&comment.body, MAX_COMMENT_BODY_CHARS),
                     created_at: comment.created_at.clone(),
                 })
                 .collect(),
@@ -410,6 +409,18 @@ fn is_safe_repo_relative_path(path: &str) -> bool {
             .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
 }
 
+fn truncate_optional_text(value: Option<&str>, max_chars: usize) -> Option<String> {
+    value.map(|value| truncate_text(value, max_chars))
+}
+
+fn truncate_text(value: &str, max_chars: usize) -> String {
+    let mut truncated = value.chars().take(max_chars).collect::<String>();
+    if value.chars().count() > max_chars {
+        truncated.push_str("\n...[truncated]");
+    }
+    truncated
+}
+
 fn is_sensitive_path(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     lower == ".env"
@@ -436,7 +447,6 @@ pub struct RepoContextRepository {
     pub full_name: String,
     pub default_branch: String,
     pub html_url: String,
-    pub checkout_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -495,6 +505,8 @@ pub struct ProjectDetection {
 const GIT_LS_FILES_TIMEOUT_SECS: u64 = 30;
 const MAX_FILE_PREVIEW_BYTES: usize = 64 * 1024;
 const MAX_FILE_PREVIEW_LINES: usize = 80;
+const MAX_ISSUE_BODY_CHARS: usize = 8_000;
+const MAX_COMMENT_BODY_CHARS: usize = 8_000;
 const MAX_ISSUE_COMMENTS: usize = 30;
 const MAX_SELECTED_FILES: usize = 40;
 const MAX_TRACKED_FILES: usize = 1_000;
@@ -583,6 +595,13 @@ mod tests {
         let commands = verification_commands(&config, &project);
 
         assert_eq!(commands, vec!["just verify".to_owned()]);
+    }
+
+    #[test]
+    fn long_context_text_is_truncated() {
+        let text = "a".repeat(10);
+
+        assert_eq!(truncate_text(&text, 5), "aaaaa\n...[truncated]");
     }
 
     #[test]
