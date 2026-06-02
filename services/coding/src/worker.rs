@@ -1,7 +1,7 @@
 use std::{
     fmt,
     fs::OpenOptions,
-    io::{ErrorKind, Write},
+    io::{Error, ErrorKind, Write},
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -10,7 +10,7 @@ use std::{
 use anyhow::{Context, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
-use tokio::{process::Command, time::timeout};
+use tokio::{process::Command, task, time::timeout};
 use tracing::{info, warn};
 
 use crate::{
@@ -61,6 +61,7 @@ pub enum RunStatus {
     Published,
     Completed,
     Blocked,
+    Cancelled,
     Failed,
 }
 
@@ -77,6 +78,7 @@ impl fmt::Display for RunStatus {
             Self::Published => write!(f, "published"),
             Self::Completed => write!(f, "completed"),
             Self::Blocked => write!(f, "blocked"),
+            Self::Cancelled => write!(f, "cancelled"),
             Self::Failed => write!(f, "failed"),
         }
     }
@@ -144,7 +146,10 @@ pub async fn claim_issue_run(
         .await
         .with_context(|| format!("failed to create {}", issue_dir.display()))?;
 
-    if run_dir.exists() {
+    if tokio::fs::try_exists(&run_dir)
+        .await
+        .with_context(|| format!("failed to inspect {}", run_dir.display()))?
+    {
         return Ok(RunClaimDecision::Duplicate {
             reason: format!("run `{}` already exists", trigger.run_id),
             active_run: read_active_run(&lock_path).await.ok().flatten(),
@@ -160,7 +165,7 @@ pub async fn claim_issue_run(
         created_at: now_rfc3339(),
     };
 
-    match create_active_lock(&lock_path, &active_run) {
+    match create_active_lock(&lock_path, &active_run).await {
         Ok(()) => {}
         Err(err) if err.kind() == ErrorKind::AlreadyExists => {
             return Ok(RunClaimDecision::Duplicate {
@@ -175,13 +180,16 @@ pub async fn claim_issue_run(
 
     if let Err(err) = tokio::fs::create_dir_all(&run_dir).await {
         remove_active_lock_best_effort(&lock_path).await;
+        remove_run_dir_best_effort(&run_dir).await;
         return Err(err).with_context(|| format!("failed to create {}", run_dir.display()));
     }
 
     if let Some(body) = event_body {
-        if let Err(err) = tokio::fs::write(run_dir.join("event.json"), body).await {
+        let event_path = run_dir.join("event.json");
+        if let Err(err) = tokio::fs::write(&event_path, body).await {
             remove_active_lock_best_effort(&lock_path).await;
-            return Err(err).context("failed to write event.json");
+            remove_run_dir_best_effort(&run_dir).await;
+            return Err(err).with_context(|| format!("failed to write {}", event_path.display()));
         }
     }
 
@@ -226,10 +234,17 @@ pub async fn run_claimed_issue(config: AppConfig, claim: RunClaim) -> anyhow::Re
     };
 
     if let Err(err) = &result {
-        let status = if cancel_marker_path_for_issue_dir(&issue_dir).exists() {
-            RunStatus::Blocked
-        } else {
-            RunStatus::Failed
+        let status = match cancel_requested_for_issue_dir(&issue_dir).await {
+            Ok(true) => RunStatus::Cancelled,
+            Ok(false) => RunStatus::Failed,
+            Err(status_err) => {
+                warn!(
+                    run_id = %run_id,
+                    error = %status_err,
+                    "failed to inspect cancel marker"
+                );
+                RunStatus::Failed
+            }
         };
         if let Err(state_err) = mark_terminal(&run_dir, status, Some(err.to_string())).await {
             warn!(
@@ -254,7 +269,7 @@ pub async fn issue_status(
 ) -> anyhow::Result<IssueStatus> {
     let issue_dir = issue_dir(config, repo, issue_number);
     let active_run = read_active_run(&active_lock_path_for_issue_dir(&issue_dir)).await?;
-    let cancel_requested = cancel_marker_path_for_issue_dir(&issue_dir).exists();
+    let cancel_requested = cancel_requested_for_issue_dir(&issue_dir).await?;
     let latest_state = latest_run_state(&issue_dir).await?;
 
     Ok(IssueStatus {
@@ -431,7 +446,7 @@ async fn post_comment_best_effort(
 }
 
 async fn ensure_not_cancelled(claim: &RunClaim) -> anyhow::Result<()> {
-    if cancel_marker_path_for_issue_dir(&claim.issue_dir).exists() {
+    if cancel_requested_for_issue_dir(&claim.issue_dir).await? {
         bail!("run cancelled by operator");
     }
     Ok(())
@@ -455,6 +470,13 @@ fn active_lock_path_for_issue_dir(issue_dir: &Path) -> PathBuf {
 
 fn cancel_marker_path_for_issue_dir(issue_dir: &Path) -> PathBuf {
     issue_dir.join("cancel.requested")
+}
+
+async fn cancel_requested_for_issue_dir(issue_dir: &Path) -> anyhow::Result<bool> {
+    let marker_path = cancel_marker_path_for_issue_dir(issue_dir);
+    tokio::fs::try_exists(&marker_path)
+        .await
+        .with_context(|| format!("failed to inspect {}", marker_path.display()))
 }
 
 async fn write_state(run_dir: &Path, state: &RunState) -> anyhow::Result<()> {
@@ -525,7 +547,15 @@ async fn latest_run_state(issue_dir: &Path) -> anyhow::Result<Option<RunState>> 
     Ok(latest)
 }
 
-fn create_active_lock(lock_path: &Path, active_run: &ActiveRun) -> std::io::Result<()> {
+async fn create_active_lock(lock_path: &Path, active_run: &ActiveRun) -> std::io::Result<()> {
+    let lock_path = lock_path.to_owned();
+    let active_run = active_run.clone();
+    task::spawn_blocking(move || create_active_lock_sync(&lock_path, &active_run))
+        .await
+        .map_err(Error::other)?
+}
+
+fn create_active_lock_sync(lock_path: &Path, active_run: &ActiveRun) -> std::io::Result<()> {
     let body = serde_json::to_vec_pretty(active_run)
         .map_err(|err| std::io::Error::new(ErrorKind::InvalidData, err))?;
     let mut file = OpenOptions::new()
@@ -587,6 +617,14 @@ async fn remove_active_lock_best_effort(lock_path: &Path) {
     }
 }
 
+async fn remove_run_dir_best_effort(run_dir: &Path) {
+    if let Err(err) = tokio::fs::remove_dir_all(run_dir).await
+        && err.kind() != ErrorKind::NotFound
+    {
+        warn!(path = %run_dir.display(), error = %err, "failed to clean up run directory");
+    }
+}
+
 async fn prepare_worktree(
     config: &AppConfig,
     token: &InstallationToken,
@@ -603,7 +641,10 @@ async fn prepare_worktree(
         bail!("computed repo workdir escaped configured workdir");
     }
 
-    if repo_dir.join(".git").exists() {
+    if tokio::fs::try_exists(repo_dir.join(".git"))
+        .await
+        .with_context(|| format!("failed to inspect {}", repo_dir.join(".git").display()))?
+    {
         run_git(
             &repo_dir,
             token,
