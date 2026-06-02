@@ -143,12 +143,33 @@ struct CancelRequest {
 }
 
 const STALE_LOCK_GRACE_SECS: u64 = 10 * 60;
+const MAX_RUN_ID_LEN: usize = 128;
+
+fn ensure_safe_run_id(run_id: &str) -> anyhow::Result<()> {
+    if is_safe_run_id(run_id) {
+        return Ok(());
+    }
+
+    bail!("run_id must be a single safe path component");
+}
+
+fn is_safe_run_id(run_id: &str) -> bool {
+    !run_id.is_empty()
+        && run_id.len() <= MAX_RUN_ID_LEN
+        && run_id != "."
+        && run_id != ".."
+        && run_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
 
 pub async fn claim_issue_run(
     config: &AppConfig,
     trigger: IssueTrigger,
     event_body: Option<&[u8]>,
 ) -> anyhow::Result<RunClaimDecision> {
+    ensure_safe_run_id(&trigger.run_id)?;
+
     let issue_dir = issue_dir(config, &trigger.repo, trigger.issue_number);
     let run_dir = run_dir_for_issue_dir(&issue_dir, &trigger.run_id);
     let lock_path = active_lock_path_for_issue_dir(&issue_dir);
@@ -181,18 +202,38 @@ pub async fn claim_issue_run(
         match create_active_lock(&lock_path, &active_run).await {
             Ok(()) => break,
             Err(err) if err.kind() == ErrorKind::AlreadyExists && !recovered_stale_lock => {
-                let active_run = read_active_run(&lock_path).await?;
-                if let Some(active_run) = active_run.as_ref() {
-                    if recover_stale_active_lock(config, &issue_dir, &lock_path, active_run).await?
-                    {
+                let active_run = match read_active_run(&lock_path).await {
+                    Ok(active_run) => active_run,
+                    Err(err) => {
+                        warn!(
+                            path = %lock_path.display(),
+                            error = %err,
+                            "removing unreadable active run lock"
+                        );
+                        remove_active_lock_best_effort(&lock_path).await;
                         recovered_stale_lock = true;
                         continue;
                     }
+                };
+
+                let Some(active_run) = active_run.as_ref() else {
+                    warn!(
+                        path = %lock_path.display(),
+                        "removing empty active run lock"
+                    );
+                    remove_active_lock_best_effort(&lock_path).await;
+                    recovered_stale_lock = true;
+                    continue;
+                };
+
+                if recover_stale_active_lock(config, &issue_dir, &lock_path, active_run).await? {
+                    recovered_stale_lock = true;
+                    continue;
                 }
 
                 return Ok(RunClaimDecision::Duplicate {
                     reason: "active run already exists".to_owned(),
-                    active_run,
+                    active_run: Some(active_run.clone()),
                 });
             }
             Err(err) if err.kind() == ErrorKind::AlreadyExists => {
@@ -288,6 +329,7 @@ pub async fn run_claimed_issue(config: AppConfig, claim: RunClaim) -> anyhow::Re
     if let Err(err) = release_active_lock(&lock_path, &run_id).await {
         warn!(run_id = %run_id, error = %err, "failed to release active run lock");
     }
+    clear_cancel_marker_best_effort(&issue_dir, &run_id).await;
 
     result
 }
@@ -616,6 +658,10 @@ async fn stale_active_lock_reason(
     issue_dir: &Path,
     active_run: &ActiveRun,
 ) -> anyhow::Result<Option<String>> {
+    if let Err(err) = ensure_safe_run_id(&active_run.run_id) {
+        return Ok(Some(format!("active lock contains unsafe run_id: {err}")));
+    }
+
     let run_dir = run_dir_for_issue_dir(issue_dir, &active_run.run_id);
 
     match read_run_state(&run_dir).await {
@@ -747,6 +793,20 @@ async fn remove_run_dir_best_effort(run_dir: &Path) {
         && err.kind() != ErrorKind::NotFound
     {
         warn!(path = %run_dir.display(), error = %err, "failed to clean up run directory");
+    }
+}
+
+async fn clear_cancel_marker_best_effort(issue_dir: &Path, run_id: &str) {
+    let marker_path = cancel_marker_path_for_issue_dir(issue_dir);
+    if let Err(err) = tokio::fs::remove_file(&marker_path).await
+        && err.kind() != ErrorKind::NotFound
+    {
+        warn!(
+            run_id = %run_id,
+            path = %marker_path.display(),
+            error = %err,
+            "failed to clear cancel marker"
+        );
     }
 }
 
@@ -993,6 +1053,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn claim_rejects_unsafe_run_id() {
+        let root = temp_dir("unsafe-run-id");
+        let config = test_config(root.join("runs"));
+        let mut trigger = test_trigger("../evil");
+
+        let err = claim_issue_run(&config, trigger.clone(), None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("run_id"));
+
+        trigger.run_id = "nested/evil".to_owned();
+        let err = claim_issue_run(&config, trigger, None).await.unwrap_err();
+        assert!(err.to_string().contains("run_id"));
+
+        cleanup(root);
+    }
+
+    #[tokio::test]
+    async fn claim_recovers_unreadable_active_lock() {
+        let root = temp_dir("corrupt-lock");
+        let config = test_config(root.join("runs"));
+        let trigger = test_trigger("delivery-new");
+        let issue_dir = issue_dir(&config, &trigger.repo, trigger.issue_number);
+        tokio::fs::create_dir_all(&issue_dir).await.unwrap();
+        tokio::fs::write(active_lock_path_for_issue_dir(&issue_dir), b"not json")
+            .await
+            .unwrap();
+
+        let decision = claim_issue_run(&config, trigger, None).await.unwrap();
+        let RunClaimDecision::Claimed(claim) = decision else {
+            panic!("expected corrupt lock recovery and new run claim");
+        };
+        let active_run = read_active_run(&claim.lock_path).await.unwrap().unwrap();
+        assert_eq!(active_run.run_id, "delivery-new");
+
+        release_active_lock(&claim.lock_path, claim.trigger.run_id.as_str())
+            .await
+            .unwrap();
+        cleanup(root);
+    }
+
+    #[tokio::test]
     async fn claim_recovers_lock_for_terminal_run() {
         let root = temp_dir("stale-lock");
         let config = test_config(root.join("runs"));
@@ -1057,6 +1159,22 @@ mod tests {
         assert_eq!(status.latest_state.unwrap().run_id, "run-new");
         assert!(status.active_run.is_none());
         assert!(!status.cancel_requested);
+
+        cleanup(root);
+    }
+
+    #[tokio::test]
+    async fn clear_cancel_marker_removes_non_sticky_cancel() {
+        let root = temp_dir("clear-cancel");
+        let config = test_config(root.join("runs"));
+        let repo = RepoRef::parse("cachebag/rafael").unwrap();
+        let issue_dir = issue_dir(&config, &repo, 7);
+        tokio::fs::create_dir_all(&issue_dir).await.unwrap();
+        let marker_path = cancel_marker_path_for_issue_dir(&issue_dir);
+        tokio::fs::write(&marker_path, b"{}").await.unwrap();
+
+        clear_cancel_marker_best_effort(&issue_dir, "run-test").await;
+        assert!(!tokio::fs::try_exists(&marker_path).await.unwrap());
 
         cleanup(root);
     }
