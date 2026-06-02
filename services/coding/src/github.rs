@@ -59,6 +59,14 @@ pub struct IssueCommentUser {
     pub login: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PullRequestInfo {
+    pub number: u64,
+    pub html_url: String,
+    pub title: String,
+    pub state: String,
+}
+
 impl GitHubClient {
     pub fn new(config: &GitHubConfig) -> anyhow::Result<Self> {
         Ok(Self {
@@ -150,6 +158,93 @@ impl GitHubClient {
         self.get_json(token, url, "issue comments").await
     }
 
+    pub async fn open_pull_request_for_branch(
+        &self,
+        token: &InstallationToken,
+        repo: &RepoRef,
+        head_owner: &str,
+        branch_name: &str,
+    ) -> anyhow::Result<Option<PullRequestInfo>> {
+        let head = url_encode_query_component(&format!("{head_owner}:{branch_name}"));
+        let url = format!(
+            "{}/repos/{repo}/pulls?state=open&head={head}&per_page=1",
+            self.api_base_url
+        );
+        let pulls = self
+            .http
+            .get(url)
+            .bearer_auth(&token.token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+            .send()
+            .await
+            .context("failed to fetch GitHub pull requests")?
+            .error_for_status()
+            .context("GitHub pull requests request failed")?
+            .json::<Vec<PullRequestInfo>>()
+            .await
+            .context("failed to parse GitHub pull requests response")?;
+
+        Ok(pulls.into_iter().next())
+    }
+
+    pub async fn create_pull_request(
+        &self,
+        token: &InstallationToken,
+        repo: &RepoRef,
+        title: &str,
+        head: &str,
+        base: &str,
+        body: &str,
+    ) -> anyhow::Result<PullRequestInfo> {
+        let url = format!("{}/repos/{repo}/pulls", self.api_base_url);
+        self.http
+            .post(url)
+            .bearer_auth(&token.token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+            .json(&CreatePullRequestRequest {
+                title,
+                head,
+                base,
+                body,
+                maintainer_can_modify: true,
+            })
+            .send()
+            .await
+            .context("failed to create GitHub pull request")?
+            .error_for_status()
+            .context("GitHub create pull request request failed")?
+            .json::<PullRequestInfo>()
+            .await
+            .context("failed to parse GitHub pull request response")
+    }
+
+    pub async fn update_pull_request(
+        &self,
+        token: &InstallationToken,
+        repo: &RepoRef,
+        pull_number: u64,
+        title: &str,
+        body: &str,
+    ) -> anyhow::Result<PullRequestInfo> {
+        let url = format!("{}/repos/{repo}/pulls/{pull_number}", self.api_base_url);
+        self.http
+            .patch(url)
+            .bearer_auth(&token.token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+            .json(&UpdatePullRequestRequest { title, body })
+            .send()
+            .await
+            .context("failed to update GitHub pull request")?
+            .error_for_status()
+            .context("GitHub update pull request request failed")?
+            .json::<PullRequestInfo>()
+            .await
+            .context("failed to parse GitHub pull request response")
+    }
+
     pub async fn post_issue_comment(
         &self,
         token: &InstallationToken,
@@ -219,6 +314,19 @@ fn create_app_jwt(app_id: u64, private_key_path: &Path) -> anyhow::Result<String
     .context("failed to sign GitHub App JWT")
 }
 
+fn url_encode_query_component(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
 #[derive(Debug, Serialize)]
 struct AppClaims {
     iat: i64,
@@ -243,6 +351,21 @@ struct InstallationTokenPermissions {
 struct CreateInstallationTokenResponse {
     token: String,
     expires_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CreatePullRequestRequest<'a> {
+    title: &'a str,
+    head: &'a str,
+    base: &'a str,
+    body: &'a str,
+    maintainer_can_modify: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdatePullRequestRequest<'a> {
+    title: &'a str,
+    body: &'a str,
 }
 
 #[derive(Debug, Serialize)]

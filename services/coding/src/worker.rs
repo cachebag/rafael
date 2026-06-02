@@ -17,6 +17,10 @@ use crate::{
     config::AppConfig,
     github::{GitHubClient, InstallationToken, IssueInfo, RepositoryInfo},
     model::ModelClient,
+    publish::{
+        PublishCommitRequest, PublishPullRequestRequest, prepare_publish_commit,
+        publish_pull_request,
+    },
     repo_context::{RepoContext, collect_repository_context},
     types::{IssueTrigger, RepoRef, TriggerKind},
     verification::{
@@ -51,6 +55,10 @@ pub struct RunState {
     pub verification_results: Vec<VerificationCommandResult>,
     pub repair_attempted: bool,
     pub repair_summary: Option<String>,
+    pub commit_sha: Option<String>,
+    pub pr_url: Option<String>,
+    pub pr_number: Option<u64>,
+    pub publish_summary: Option<String>,
     pub error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -66,6 +74,8 @@ pub enum RunStatus {
     Implementing,
     Verifying,
     Verified,
+    Publishing,
+    Published,
     Completed,
     Blocked,
     Failed,
@@ -115,6 +125,10 @@ async fn run_issue_triggered_inner(config: AppConfig, trigger: IssueTrigger) -> 
         verification_results: Vec::new(),
         repair_attempted: false,
         repair_summary: None,
+        commit_sha: None,
+        pr_url: None,
+        pr_number: None,
+        publish_summary: None,
         error: None,
         created_at: created_at.clone(),
         updated_at: created_at,
@@ -254,7 +268,8 @@ async fn run_issue_triggered_inner(config: AppConfig, trigger: IssueTrigger) -> 
         return Ok(());
     }
 
-    run_verification_phase(&mut state, &run_context).await
+    run_verification_phase(&mut state, &run_context).await?;
+    run_publish_phase(&mut state, &run_context).await
 }
 
 async fn handle_change_execution_outcome(
@@ -332,6 +347,96 @@ async fn run_verification_phase(
     }
 
     fail_verification(state, context, &rerun, "verification failed after repair").await
+}
+
+async fn run_publish_phase(
+    state: &mut RunState,
+    context: &WorkerRunContext<'_>,
+) -> anyhow::Result<()> {
+    if !should_attempt_publish(context.config, state) {
+        return Ok(());
+    }
+
+    state.status = RunStatus::Publishing;
+    state.updated_at = now_rfc3339();
+    write_state(context.run_dir, state).await?;
+
+    let commit = match prepare_publish_commit(PublishCommitRequest {
+        config: context.config,
+        repo: context.repo,
+        issue: context.issue,
+        branch_name: context.branch_name,
+        checkout_path: context.worktree_path,
+        verification_status: state.verification_status,
+    })
+    .await
+    {
+        Ok(commit) => commit,
+        Err(err) => {
+            state.status = RunStatus::Failed;
+            state.error = Some(format!("publish commit failed: {err}"));
+            state.updated_at = now_rfc3339();
+            write_state(context.run_dir, state).await?;
+            return Err(err).context("publish commit failed");
+        }
+    };
+
+    state.commit_sha = Some(commit.commit_sha.clone());
+    state.publish_summary = Some(format!("created local commit {}", commit.commit_sha));
+    state.updated_at = now_rfc3339();
+    write_state(context.run_dir, state).await?;
+
+    let published = match publish_pull_request(PublishPullRequestRequest {
+        github: context.github,
+        token: context.token,
+        repo_ref: context.repo_ref,
+        repo: context.repo,
+        issue: context.issue,
+        branch_name: context.branch_name,
+        checkout_path: context.worktree_path,
+        commit_sha: &commit.commit_sha,
+        implementation_summary: state.implementation_summary.as_deref(),
+        run_id: context.run_id,
+    })
+    .await
+    {
+        Ok(published) => published,
+        Err(err) => {
+            state.status = RunStatus::Failed;
+            state.error = Some(format!("publish PR failed: {err}"));
+            state.updated_at = now_rfc3339();
+            write_state(context.run_dir, state).await?;
+            return Err(err).context("publish PR failed");
+        }
+    };
+
+    state.status = RunStatus::Published;
+    state.pr_url = Some(published.pr_url.clone());
+    state.pr_number = Some(published.pr_number);
+    state.publish_summary = Some(if published.created {
+        format!("created pull request {}", published.pr_url)
+    } else {
+        format!("updated pull request {}", published.pr_url)
+    });
+    state.updated_at = now_rfc3339();
+    write_state(context.run_dir, state).await?;
+
+    post_comment_best_effort(
+        context.github,
+        context.token,
+        context.repo_ref,
+        context.issue_number,
+        &publish_completed_comment(&published.pr_url, &commit.commit_sha, published.created),
+    )
+    .await;
+
+    Ok(())
+}
+
+fn should_attempt_publish(config: &AppConfig, state: &RunState) -> bool {
+    matches!(state.status, RunStatus::Verified)
+        || (config.workspace.allow_unverified_publish
+            && matches!(state.status, RunStatus::Completed))
 }
 
 async fn start_verification(
@@ -515,6 +620,11 @@ struct WorkerRunContext<'a> {
     run_dir: &'a Path,
     issue_number: u64,
     run_id: &'a str,
+}
+
+fn publish_completed_comment(pr_url: &str, commit_sha: &str, created: bool) -> String {
+    let action = if created { "Created" } else { "Updated" };
+    format!("{action} pull request: {pr_url}\n\nCommit: `{commit_sha}`")
 }
 
 fn verification_passed_comment(
