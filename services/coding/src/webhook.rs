@@ -286,6 +286,11 @@ mod tests {
                 runs_dir: PathBuf::from("/tmp/runs"),
                 max_run_minutes: 45,
                 verify_commands: Vec::new(),
+                max_tool_iterations: 24,
+                max_tool_runtime_seconds: 900,
+                max_file_read_bytes: 131_072,
+                max_write_bytes: 262_144,
+                max_changed_files: 12,
             },
             server: ServerConfig {
                 bind: "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
