@@ -38,6 +38,7 @@ pub struct WorkspaceConfig {
     pub workdir: PathBuf,
     pub runs_dir: PathBuf,
     pub max_run_minutes: u64,
+    pub verify_commands: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +102,7 @@ impl AppConfig {
                 max_run_minutes: env_or("RAFAEL_MAX_RUN_MINUTES", "45")
                     .parse()
                     .context("RAFAEL_MAX_RUN_MINUTES must be an integer")?,
+                verify_commands: split_command_list(&env_or("RAFAEL_VERIFY_COMMANDS", "")),
                 workdir,
             },
             server: ServerConfig {
@@ -153,6 +155,15 @@ fn env_or(name: &str, default: &str) -> String {
 fn split_csv(value: &str) -> Vec<String> {
     value
         .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn split_command_list(value: &str) -> Vec<String> {
+    value
+        .split([',', '\n'])
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)

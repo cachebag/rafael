@@ -1,6 +1,7 @@
 mod config;
 mod github;
 mod model;
+mod repo_context;
 mod server;
 mod types;
 mod webhook;
@@ -76,6 +77,7 @@ async fn main() -> anyhow::Result<()> {
                 mention = %config.github.command_mention,
                 bind = %config.server.bind,
                 max_run_minutes = config.workspace.max_run_minutes,
+                verify_commands_count = config.workspace.verify_commands.len(),
                 "configuration loaded"
             );
             Ok(())

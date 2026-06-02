@@ -285,6 +285,7 @@ mod tests {
                 workdir: PathBuf::from("/tmp/work"),
                 runs_dir: PathBuf::from("/tmp/runs"),
                 max_run_minutes: 45,
+                verify_commands: Vec::new(),
             },
             server: ServerConfig {
                 bind: "127.0.0.1:0".parse::<SocketAddr>().unwrap(),

@@ -10,6 +10,7 @@ use crate::{
     config::AppConfig,
     github::{GitHubClient, InstallationToken, IssueInfo, RepositoryInfo},
     model::ModelClient,
+    repo_context::collect_repository_context,
     types::{IssueTrigger, RepoRef, TriggerKind},
 };
 
@@ -27,6 +28,7 @@ pub struct RunState {
     pub default_branch: Option<String>,
     pub branch_name: Option<String>,
     pub worktree_path: Option<PathBuf>,
+    pub context_path: Option<PathBuf>,
     pub plan_path: Option<PathBuf>,
     pub created_at: String,
     pub updated_at: String,
@@ -74,6 +76,7 @@ async fn run_issue_triggered_inner(config: AppConfig, trigger: IssueTrigger) -> 
         default_branch: trigger.default_branch.clone(),
         branch_name: None,
         worktree_path: None,
+        context_path: None,
         plan_path: None,
         created_at: created_at.clone(),
         updated_at: created_at,
@@ -98,6 +101,9 @@ async fn run_issue_triggered_inner(config: AppConfig, trigger: IssueTrigger) -> 
     let repo = github.repository(&token, &trigger.repo).await?;
     let issue = github
         .issue(&token, &trigger.repo, trigger.issue_number)
+        .await?;
+    let issue_comments = github
+        .issue_comments(&token, &trigger.repo, trigger.issue_number)
         .await?;
 
     if issue.pull_request.is_some() {
@@ -126,11 +132,25 @@ async fn run_issue_triggered_inner(config: AppConfig, trigger: IssueTrigger) -> 
 
     state.status = RunStatus::Prepared;
     state.branch_name = Some(branch_name.clone());
-    state.worktree_path = Some(worktree_path);
+    state.worktree_path = Some(worktree_path.clone());
     state.updated_at = now_rfc3339();
     write_state(&run_dir, &state).await?;
 
-    let plan = model.issue_plan(&repo, &issue, &branch_name).await?;
+    let repo_context =
+        collect_repository_context(&config, &repo, &issue, &issue_comments, &worktree_path).await?;
+    let context_path = run_dir.join("context.json");
+    let context_body =
+        serde_json::to_vec_pretty(&repo_context).context("failed to serialize repo context")?;
+    tokio::fs::write(&context_path, context_body)
+        .await
+        .with_context(|| format!("failed to write {}", context_path.display()))?;
+    state.context_path = Some(context_path);
+    state.updated_at = now_rfc3339();
+    write_state(&run_dir, &state).await?;
+
+    let plan = model
+        .issue_plan(&repo, &issue, &branch_name, &repo_context)
+        .await?;
     let plan_path = run_dir.join("plan.md");
     tokio::fs::write(&plan_path, plan)
         .await

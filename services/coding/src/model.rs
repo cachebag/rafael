@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     config::ModelConfig,
     github::{IssueInfo, RepositoryInfo},
+    repo_context::RepoContext,
 };
 
 #[derive(Clone)]
@@ -30,24 +31,28 @@ impl ModelClient {
         repo: &RepositoryInfo,
         issue: &IssueInfo,
         branch_name: &str,
+        context: &RepoContext,
     ) -> anyhow::Result<String> {
-        let body = issue.body.as_deref().unwrap_or("(no issue body)");
+        let body = context.issue.body.as_deref().unwrap_or("(no issue body)");
         let labels = issue
             .labels
             .iter()
             .map(|label| label.name.as_str())
             .collect::<Vec<_>>()
             .join(", ");
+        let context_json = serde_json::to_string(context)
+            .context("failed to serialize repository context for model prompt")?;
 
         let prompt = format!(
-            "Repository: {}\nDefault branch: {}\nTarget branch: {}\nIssue #{}: {}\nLabels: {}\nIssue body:\n{}\n\nWrite a concise implementation plan. Do not include code. Call out any ambiguity or safety concerns.",
+            "Repository: {}\nDefault branch: {}\nTarget branch: {}\nIssue #{}: {}\nLabels: {}\nIssue body:\n{}\n\nRepository context JSON:\n{}\n\nWrite a concise implementation plan with these sections:\n- Files likely affected\n- Implementation steps\n- Verification commands\n- Blockers or questions\n\nDo not include code. If the likely files are unclear, state why.",
             repo.full_name,
             repo.default_branch,
             branch_name,
             issue.number,
             issue.title,
             if labels.is_empty() { "(none)" } else { &labels },
-            body
+            body,
+            context_json
         );
 
         let response = self
