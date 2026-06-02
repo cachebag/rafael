@@ -245,6 +245,11 @@ async fn execute_action(
 ) -> anyhow::Result<ActionExecution> {
     match action {
         ChangeAction::ReadFile { path } => read_file_action(path, sandbox, limits).await,
+        ChangeAction::ReadFileRange {
+            path,
+            start_line,
+            end_line,
+        } => read_file_range_action(path, *start_line, *end_line, sandbox, limits).await,
         ChangeAction::Search { query, path } => {
             search_action(query, path.as_deref(), sandbox, limits).await
         }
@@ -297,8 +302,14 @@ async fn repeated_action_result(
     limits: &ExecutionLimits,
 ) -> anyhow::Result<ActionResult> {
     let message = match action {
-        ChangeAction::ReadFile { .. } | ChangeAction::Search { .. } => {
-            "same read/search action was just attempted; use the prior result and choose a different action".to_owned()
+        ChangeAction::ReadFile { .. } => {
+            "same read_file action was just attempted. The file content is included again below; use it now, or use read_file_range/search for a specific symbol before choosing an edit_file/write_file/done action.".to_owned()
+        }
+        ChangeAction::ReadFileRange { .. } => {
+            "same read_file_range action was just attempted. The requested line range is included again below; use it now, or choose a different range/search/edit action.".to_owned()
+        }
+        ChangeAction::Search { .. } => {
+            "same search action was just attempted; use the prior matches and choose a different action".to_owned()
         }
         ChangeAction::WriteFile { .. } | ChangeAction::EditFile { .. } => {
             "same write/edit action was just attempted. If the previous result was ok, that change is already applied; do not repeat it. Inspect the current file content below, address the next requested feedback item, or return done only after all feedback is complete.".to_owned()
@@ -333,7 +344,19 @@ async fn action_file_content_for_prompt(
     sandbox: &RepoSandbox,
     limits: &ExecutionLimits,
 ) -> Option<(String, u64)> {
-    file_content_for_prompt(action.target_path()?, sandbox, limits).await
+    match action {
+        ChangeAction::ReadFileRange {
+            path,
+            start_line,
+            end_line,
+        } => range_file_content_for_prompt(path, *start_line, *end_line, sandbox, limits)
+            .await
+            .map(|content| {
+                let bytes = content.len() as u64;
+                (content, bytes)
+            }),
+        _ => file_content_for_prompt(action.target_path()?, sandbox, limits).await,
+    }
 }
 
 async fn file_content_for_prompt(
@@ -376,7 +399,7 @@ async fn read_file_action(
     if metadata.len() > limits.max_read_bytes {
         return Ok(ActionExecution::continue_with(ActionResult::error(
             format!(
-                "file is too large to read safely ({} bytes > {} bytes)",
+                "file is too large to read safely ({} bytes > {} bytes). Use read_file_range with line numbers or search for a specific symbol/text instead.",
                 metadata.len(),
                 limits.max_read_bytes
             ),
@@ -404,6 +427,81 @@ async fn read_file_action(
     Ok(ActionExecution::continue_with(
         ActionResult::ok(format!("read {path}")).with_content(content, metadata.len()),
     ))
+}
+
+async fn read_file_range_action(
+    path: &str,
+    start_line: usize,
+    end_line: usize,
+    sandbox: &RepoSandbox,
+    limits: &ExecutionLimits,
+) -> anyhow::Result<ActionExecution> {
+    if start_line == 0 || end_line < start_line {
+        return Ok(ActionExecution::continue_with(ActionResult::error(
+            "read_file_range requires start_line >= 1 and end_line >= start_line".to_owned(),
+        )));
+    }
+
+    let Some(content) =
+        range_file_content_for_prompt(path, start_line, end_line, sandbox, limits).await
+    else {
+        return Ok(ActionExecution::continue_with(ActionResult::error(
+            "could not read requested range; verify the path and use a smaller line range"
+                .to_owned(),
+        )));
+    };
+
+    Ok(ActionExecution::continue_with(
+        ActionResult::ok(format!("read {path}:{start_line}-{end_line}"))
+            .with_content(content.clone(), content.len() as u64),
+    ))
+}
+
+async fn range_file_content_for_prompt(
+    path: &str,
+    start_line: usize,
+    end_line: usize,
+    sandbox: &RepoSandbox,
+    limits: &ExecutionLimits,
+) -> Option<String> {
+    if start_line == 0 || end_line < start_line {
+        return None;
+    }
+
+    let (content, _) = file_content_for_prompt(path, sandbox, limits).await?;
+    format_line_range(&content, start_line, end_line, limits.max_read_lines)
+}
+
+fn format_line_range(
+    content: &str,
+    start_line: usize,
+    end_line: usize,
+    max_lines: usize,
+) -> Option<String> {
+    if start_line == 0 || end_line < start_line || max_lines == 0 {
+        return None;
+    }
+
+    let selected = content
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let line_number = index + 1;
+            (line_number >= start_line && line_number <= end_line)
+                .then(|| format!("{line_number}: {line}"))
+        })
+        .take(max_lines)
+        .collect::<Vec<_>>();
+
+    if selected.is_empty() {
+        return None;
+    }
+
+    let mut content = selected.join("\n");
+    if end_line.saturating_sub(start_line) + 1 > max_lines {
+        content.push_str("\n...[range truncated]");
+    }
+    Some(content)
 }
 
 async fn search_action(
@@ -734,7 +832,7 @@ fn build_action_prompt(
         .context("failed to serialize change execution history")?;
 
     Ok(format!(
-        "Repository: {}\nDefault branch: {}\nTarget branch: {}\nIssue #{}: {}\nLabels: {}\nIssue body:\n{}\n\nImplementation plan:\n{}\n\nRepository context JSON:\n{}\n\nPrior tool history JSON:\n{}\n\nYou are editing the prepared local branch through a bounded tool loop. Choose exactly one next action and return exactly one JSON object with no Markdown, comments, or extra text. Available actions:\n- {{\"action\":\"read_file\",\"path\":\"relative/path\"}}\n- {{\"action\":\"search\",\"query\":\"case-insensitive literal text\",\"path\":\"optional/relative/scope\"}}\n- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"complete file contents\"}}\n- {{\"action\":\"edit_file\",\"path\":\"relative/path\",\"old_text\":\"exact text appearing once\",\"new_text\":\"replacement text\"}}\n- {{\"action\":\"done\",\"status\":\"completed\",\"summary\":\"what changed\"}}\n- {{\"action\":\"done\",\"status\":\"blocked\",\"summary\":\"why blocked\",\"question\":\"what you need clarified\"}}\n\nConstraints:\n- Paths must be repository-relative, inside the checkout, and must not use .git, parent traversal, absolute paths, or known secret files.\n- Do not request shell commands, commits, pushes, branch changes, package installs, or network calls.\n- Keep changes minimal and focused on the issue. Prefer read_file/search before edits when context is missing.\n- Treat trusted review feedback in the implementation plan as a checklist. After a successful write/edit, move to the next unaddressed feedback item. Do not repeat the same edit.\n- If old_text no longer matches, the file may already be changed; use the current file content from tool history, read the file, or choose the next file.\n- Return done with status completed only after every requested feedback item is addressed.\n- write_file content must be at most {} bytes; reads are capped at {} bytes; the run may change at most {} files.\n- If the requested change cannot be completed safely with these actions, return done with status blocked.",
+        "Repository: {}\nDefault branch: {}\nTarget branch: {}\nIssue #{}: {}\nLabels: {}\nIssue body:\n{}\n\nImplementation plan:\n{}\n\nRepository context JSON:\n{}\n\nPrior tool history JSON:\n{}\n\nYou are editing the prepared local branch through a bounded tool loop. Choose exactly one next action and return exactly one JSON object with no Markdown, comments, or extra text. Available actions:\n- {{\"action\":\"read_file\",\"path\":\"relative/path\"}}\n- {{\"action\":\"read_file_range\",\"path\":\"relative/path\",\"start_line\":1,\"end_line\":80}}\n- {{\"action\":\"search\",\"query\":\"case-insensitive literal text\",\"path\":\"optional/relative/scope\"}}\n- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"complete file contents\"}}\n- {{\"action\":\"edit_file\",\"path\":\"relative/path\",\"old_text\":\"exact text appearing once\",\"new_text\":\"replacement text\"}}\n- {{\"action\":\"done\",\"status\":\"completed\",\"summary\":\"what changed\"}}\n- {{\"action\":\"done\",\"status\":\"blocked\",\"summary\":\"why blocked\",\"question\":\"what you need clarified\"}}\n\nConstraints:\n- Paths must be repository-relative, inside the checkout, and must not use .git, parent traversal, absolute paths, or known secret files.\n- Do not request shell commands, commits, pushes, branch changes, package installs, or network calls.\n- Keep changes minimal and focused on the issue. Prefer search/read_file_range for large files or known symbols; use read_file only for small files.\n- Treat trusted review feedback in the implementation plan as a checklist. After a successful write/edit, move to the next unaddressed feedback item. Do not repeat the same edit.\n- If old_text no longer matches, the file may already be changed; use the current file content from tool history, read the file, or choose the next file.\n- Return done with status completed only after every requested feedback item is addressed.\n- write_file content must be at most {} bytes; whole-file reads are capped at {} bytes; range reads are capped at {} lines; the run may change at most {} files.\n- If the requested change cannot be completed safely with these actions, return done with status blocked.",
         repo.full_name,
         repo.default_branch,
         branch_name,
@@ -747,6 +845,7 @@ fn build_action_prompt(
         history_json,
         limits.max_write_bytes,
         limits.max_read_bytes,
+        limits.max_read_lines,
         limits.max_changed_files
     ))
 }
@@ -1132,6 +1231,7 @@ struct ExecutionLimits {
     max_runtime: Duration,
     max_runtime_seconds: u64,
     max_read_bytes: u64,
+    max_read_lines: usize,
     max_write_bytes: usize,
     max_changed_files: usize,
     max_search_results: usize,
@@ -1144,6 +1244,7 @@ impl ExecutionLimits {
             max_runtime: Duration::from_secs(config.workspace.max_tool_runtime_seconds),
             max_runtime_seconds: config.workspace.max_tool_runtime_seconds,
             max_read_bytes: config.workspace.max_file_read_bytes,
+            max_read_lines: MAX_RANGE_READ_LINES,
             max_write_bytes: config.workspace.max_write_bytes,
             max_changed_files: config.workspace.max_changed_files,
             max_search_results: MAX_SEARCH_RESULTS,
@@ -1178,6 +1279,11 @@ enum ChangeAction {
     ReadFile {
         path: String,
     },
+    ReadFileRange {
+        path: String,
+        start_line: usize,
+        end_line: usize,
+    },
     Search {
         #[serde(alias = "pattern")]
         query: String,
@@ -1208,6 +1314,16 @@ impl ChangeAction {
             Self::ReadFile { path } => serde_json::json!({
                 "action": "read_file",
                 "path": path,
+            }),
+            Self::ReadFileRange {
+                path,
+                start_line,
+                end_line,
+            } => serde_json::json!({
+                "action": "read_file_range",
+                "path": path,
+                "start_line": start_line,
+                "end_line": end_line,
             }),
             Self::Search { query, path } => serde_json::json!({
                 "action": "search",
@@ -1248,6 +1364,7 @@ impl ChangeAction {
     fn target_path(&self) -> Option<&str> {
         match self {
             Self::ReadFile { path }
+            | Self::ReadFileRange { path, .. }
             | Self::WriteFile { path, .. }
             | Self::EditFile { path, .. } => Some(path),
             Self::Search { path, .. } => path.as_deref(),
@@ -1458,6 +1575,7 @@ fn should_finish_after_repeated_write_edit(
 const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
 const MAX_SEARCH_RESULTS: usize = 40;
 const MAX_SEARCH_PREVIEW_CHARS: usize = 240;
+const MAX_RANGE_READ_LINES: usize = 160;
 const MAX_HISTORY_ACTION_TEXT_CHARS: usize = 2_000;
 const MAX_HISTORY_VALUE_CHARS: usize = 4_000;
 const MAX_PROMPT_HISTORY_ENTRIES: usize = 8;
@@ -1486,6 +1604,23 @@ mod tests {
         .unwrap();
 
         assert!(matches!(action, ChangeAction::Done { .. }));
+    }
+
+    #[test]
+    fn parses_read_file_range_action() {
+        let action = parse_action(
+            r#"{"action":"read_file_range","path":"src/main.rs","start_line":10,"end_line":20}"#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            action,
+            ChangeAction::ReadFileRange {
+                path,
+                start_line: 10,
+                end_line: 20,
+            } if path == "src/main.rs"
+        ));
     }
 
     #[test]
@@ -1539,6 +1674,24 @@ mod tests {
         ];
 
         assert_eq!(consecutive_action_repetitions(&history, &repeated), 1);
+    }
+
+    #[test]
+    fn formats_line_ranges_with_line_numbers() {
+        let content = "one\ntwo\nthree\nfour\n";
+
+        let range = format_line_range(content, 2, 3, 10).unwrap();
+
+        assert_eq!(range, "2: two\n3: three");
+    }
+
+    #[test]
+    fn line_range_formatting_honors_max_lines() {
+        let content = "one\ntwo\nthree\nfour\n";
+
+        let range = format_line_range(content, 1, 4, 2).unwrap();
+
+        assert_eq!(range, "1: one\n2: two\n...[range truncated]");
     }
 
     #[test]
