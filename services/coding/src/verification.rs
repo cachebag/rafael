@@ -8,6 +8,8 @@ use std::{
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use tokio::{
+    fs::{File, OpenOptions},
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     process::Command,
     time::{Instant, timeout},
 };
@@ -157,10 +159,11 @@ async fn run_and_record_command(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    remove_sensitive_child_env(&mut process);
 
-    let output = match timeout(command_timeout, process.output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(err)) => {
+    let mut child = match process.spawn() {
+        Ok(child) => child,
+        Err(err) => {
             let stderr = format!("failed to execute verification command: {err}\n");
             write_command_logs(&stdout_path, &stderr_path, b"", stderr.as_bytes()).await?;
             return Ok(VerificationCommandResult::failed_before_spawn(
@@ -172,12 +175,53 @@ async fn run_and_record_command(
                 stderr,
             ));
         }
+    };
+
+    let stdout = child
+        .stdout
+        .take()
+        .context("spawned verification command stdout was not piped")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("spawned verification command stderr was not piped")?;
+    let stdout_task = tokio::spawn(stream_output_to_file(stdout, stdout_path.clone()));
+    let stderr_task = tokio::spawn(stream_output_to_file(stderr, stderr_path.clone()));
+
+    let status = match timeout(command_timeout, child.wait()).await {
+        Ok(Ok(status)) => status,
+        Ok(Err(err)) => {
+            let stderr = format!("failed to wait for verification command: {err}\n");
+            write_command_logs(&stdout_path, &stderr_path, b"", stderr.as_bytes()).await?;
+            return Ok(VerificationCommandResult::failed_before_spawn(
+                index,
+                command,
+                command_path,
+                stdout_path,
+                stderr_path,
+                stderr,
+            ));
+        }
         Err(_) => {
-            let stderr = format!(
-                "verification command timed out after {} seconds\n",
+            let timeout_message = format!(
+                "verification command timed out after {} seconds",
                 command_timeout.as_secs()
             );
-            write_command_logs(&stdout_path, &stderr_path, b"", stderr.as_bytes()).await?;
+            if let Err(err) = child.kill().await {
+                append_log_marker(
+                    &stderr_path,
+                    &format!("{timeout_message}; failed to kill process: {err}\n"),
+                )
+                .await?;
+            }
+            let stdout_log = finish_output_task(stdout_task).await?;
+            let mut stderr_log = finish_output_task(stderr_task).await?;
+            append_log_marker(&stderr_path, &format!("{timeout_message}\n")).await?;
+            stderr_log.preview = Some(append_preview_marker(
+                stderr_log.preview.as_deref(),
+                &timeout_message,
+            ));
+
             return Ok(VerificationCommandResult::timed_out(
                 index,
                 command,
@@ -185,13 +229,15 @@ async fn run_and_record_command(
                 stdout_path,
                 stderr_path,
                 command_timeout.as_secs(),
+                stdout_log,
+                stderr_log,
             ));
         }
     };
 
-    write_command_logs(&stdout_path, &stderr_path, &output.stdout, &output.stderr).await?;
-
-    let success = output.status.success();
+    let stdout_log = finish_output_task(stdout_task).await?;
+    let stderr_log = finish_output_task(stderr_task).await?;
+    let success = status.success();
     Ok(VerificationCommandResult {
         index,
         command: command.to_owned(),
@@ -199,11 +245,13 @@ async fn run_and_record_command(
         stdout_path,
         stderr_path,
         success,
-        exit_code: output.status.code(),
+        exit_code: status.code(),
         timed_out: false,
         error: None,
-        stdout_preview: preview_output(&output.stdout),
-        stderr_preview: preview_output(&output.stderr),
+        stdout_preview: stdout_log.preview,
+        stderr_preview: stderr_log.preview,
+        stdout_truncated: stdout_log.truncated,
+        stderr_truncated: stderr_log.truncated,
     })
 }
 
@@ -220,6 +268,108 @@ async fn write_command_logs(
         .await
         .with_context(|| format!("failed to write {}", stderr_path.display()))?;
     Ok(())
+}
+
+fn remove_sensitive_child_env(process: &mut Command) {
+    for key in std::env::vars()
+        .map(|(key, _value)| key)
+        .filter(|key| key.starts_with("RAFAEL_"))
+    {
+        process.env_remove(key);
+    }
+}
+
+async fn stream_output_to_file<R>(mut reader: R, path: PathBuf) -> anyhow::Result<OutputLog>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut file = File::create(&path)
+        .await
+        .with_context(|| format!("failed to create {}", path.display()))?;
+    let mut buffer = [0_u8; OUTPUT_STREAM_BUFFER_BYTES];
+    let mut tail = Vec::new();
+    let mut bytes_read = 0_usize;
+    let mut bytes_written = 0_usize;
+    let mut truncated = false;
+
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .await
+            .with_context(|| format!("failed to read command output for {}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+
+        bytes_read = bytes_read.saturating_add(read);
+        if bytes_written < MAX_OUTPUT_LOG_BYTES {
+            let remaining = MAX_OUTPUT_LOG_BYTES - bytes_written;
+            let write_len = read.min(remaining);
+            file.write_all(&buffer[..write_len])
+                .await
+                .with_context(|| format!("failed to write {}", path.display()))?;
+            append_tail(&mut tail, &buffer[..write_len]);
+            bytes_written += write_len;
+            truncated = truncated || write_len < read;
+        } else {
+            truncated = true;
+        }
+    }
+
+    if truncated {
+        let marker = format!(
+            "\n...[truncated after {} bytes; read {} bytes]\n",
+            MAX_OUTPUT_LOG_BYTES, bytes_read
+        );
+        file.write_all(marker.as_bytes())
+            .await
+            .with_context(|| format!("failed to write truncation marker to {}", path.display()))?;
+        append_tail(&mut tail, marker.as_bytes());
+    }
+    file.flush()
+        .await
+        .with_context(|| format!("failed to flush {}", path.display()))?;
+
+    Ok(OutputLog {
+        preview: preview_output(&tail),
+        truncated,
+    })
+}
+
+async fn finish_output_task(
+    task: tokio::task::JoinHandle<anyhow::Result<OutputLog>>,
+) -> anyhow::Result<OutputLog> {
+    task.await
+        .context("verification output stream task failed")?
+}
+
+async fn append_log_marker(path: &Path, marker: &str) -> anyhow::Result<()> {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await
+        .with_context(|| format!("failed to open {}", path.display()))?;
+    file.write_all(marker.as_bytes())
+        .await
+        .with_context(|| format!("failed to append {}", path.display()))?;
+    Ok(())
+}
+
+fn append_tail(tail: &mut Vec<u8>, bytes: &[u8]) {
+    tail.extend_from_slice(bytes);
+    if tail.len() > MAX_OUTPUT_PREVIEW_BYTES {
+        let overflow = tail.len() - MAX_OUTPUT_PREVIEW_BYTES;
+        tail.drain(..overflow);
+    }
+}
+
+fn append_preview_marker(preview: Option<&str>, marker: &str) -> String {
+    let combined = match preview {
+        Some(preview) if !preview.is_empty() => format!("{preview}\n{marker}"),
+        _ => marker.to_owned(),
+    };
+    truncate_text(&combined, MAX_OUTPUT_PREVIEW_CHARS)
 }
 
 fn verification_status(
@@ -493,6 +643,8 @@ pub struct VerificationCommandResult {
     pub error: Option<String>,
     pub stdout_preview: Option<String>,
     pub stderr_preview: Option<String>,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
 }
 
 impl VerificationCommandResult {
@@ -516,6 +668,8 @@ impl VerificationCommandResult {
             error: Some(error),
             stdout_preview: None,
             stderr_preview: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
         }
     }
 
@@ -526,6 +680,8 @@ impl VerificationCommandResult {
         stdout_path: PathBuf,
         stderr_path: PathBuf,
         timeout_seconds: u64,
+        stdout_log: OutputLog,
+        stderr_log: OutputLog,
     ) -> Self {
         Self {
             index,
@@ -537,12 +693,22 @@ impl VerificationCommandResult {
             exit_code: None,
             timed_out: true,
             error: Some(format!("timed out after {timeout_seconds} seconds")),
-            stdout_preview: None,
-            stderr_preview: Some(format!(
-                "verification command timed out after {timeout_seconds} seconds"
-            )),
+            stdout_preview: stdout_log.preview,
+            stderr_preview: stderr_log.preview.or_else(|| {
+                Some(format!(
+                    "verification command timed out after {timeout_seconds} seconds"
+                ))
+            }),
+            stdout_truncated: stdout_log.truncated,
+            stderr_truncated: stderr_log.truncated,
         }
     }
+}
+
+#[derive(Debug)]
+struct OutputLog {
+    preview: Option<String>,
+    truncated: bool,
 }
 
 #[derive(Debug)]
@@ -576,8 +742,11 @@ impl VerificationLimits {
 }
 
 const MAX_FAILED_SUMMARIES: usize = 3;
+const MAX_OUTPUT_LOG_BYTES: usize = 1024 * 1024;
+const MAX_OUTPUT_PREVIEW_BYTES: usize = 16 * 1024;
 const MAX_OUTPUT_PREVIEW_LINES: usize = 40;
 const MAX_OUTPUT_PREVIEW_CHARS: usize = 8_000;
+const OUTPUT_STREAM_BUFFER_BYTES: usize = 8 * 1024;
 
 #[cfg(test)]
 mod tests {
