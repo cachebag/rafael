@@ -1,0 +1,25 @@
+# NOTE:
+# This assumes llama.cpp is installed at:
+#   ~/src/llama.cpp
+#
+# TODO: Make configurable
+[Unit]
+Description=llama.cpp server
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/src/llama.cpp
+Environment=PATH=/opt/cuda/bin:/usr/local/bin:/usr/bin:/bin
+Environment=LD_LIBRARY_PATH=/opt/cuda/lib64
+ExecStart=%h/src/llama.cpp/build/bin/llama-server \
+  -hf Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M \
+  --host 0.0.0.0 \
+  --port 8080 \
+  -c 8192 \
+  -ngl 999
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
