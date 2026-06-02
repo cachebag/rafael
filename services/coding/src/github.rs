@@ -46,6 +46,19 @@ pub struct IssueLabel {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IssueComment {
+    pub id: u64,
+    pub body: String,
+    pub created_at: String,
+    pub user: IssueCommentUser,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IssueCommentUser {
+    pub login: String,
+}
+
 impl GitHubClient {
     pub fn new(config: &GitHubConfig) -> anyhow::Result<Self> {
         Ok(Self {
@@ -122,6 +135,19 @@ impl GitHubClient {
     ) -> anyhow::Result<IssueInfo> {
         let url = format!("{}/repos/{repo}/issues/{issue_number}", self.api_base_url);
         self.get_json(token, url, "issue").await
+    }
+
+    pub async fn issue_comments(
+        &self,
+        token: &InstallationToken,
+        repo: &RepoRef,
+        issue_number: u64,
+    ) -> anyhow::Result<Vec<IssueComment>> {
+        let url = format!(
+            "{}/repos/{repo}/issues/{issue_number}/comments?per_page=30",
+            self.api_base_url
+        );
+        self.get_json(token, url, "issue comments").await
     }
 
     pub async fn post_issue_comment(
