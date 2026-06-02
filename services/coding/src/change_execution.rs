@@ -1091,6 +1091,10 @@ fn is_sensitive_path(path: &str) -> bool {
         .map(str::to_ascii_lowercase)
         .unwrap_or_default();
 
+    if is_allowed_env_example(&file_name) {
+        return false;
+    }
+
     lower == ".env"
         || lower.starts_with(".env.")
         || lower.contains("/.env")
@@ -1103,6 +1107,10 @@ fn is_sensitive_path(path: &str) -> bool {
             file_name.as_str(),
             "id_rsa" | "id_ed25519" | "credentials" | "netrc" | ".netrc"
         )
+}
+
+fn is_allowed_env_example(file_name: &str) -> bool {
+    matches!(file_name, ".env.example" | ".env.sample" | ".env.template")
 }
 
 fn truncate_for_prompt(value: &str) -> String {
@@ -1486,6 +1494,9 @@ mod tests {
         assert!(sanitize_repo_path(".git/config").is_err());
         assert!(sanitize_repo_path("/tmp/file").is_err());
         assert!(sanitize_repo_path(".env").is_err());
+        assert!(sanitize_repo_path(".env.example").is_ok());
+        assert!(sanitize_repo_path("services/coding/.env.example").is_ok());
+        assert!(sanitize_repo_path("services/coding/.env.local").is_err());
         assert!(sanitize_repo_path("src/main.rs").is_ok());
     }
 

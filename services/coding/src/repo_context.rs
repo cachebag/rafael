@@ -146,14 +146,16 @@ fn mentioned_paths(
         .map(String::as_str)
         .collect::<HashSet<_>>();
     let mut matches = BTreeSet::new();
+    let mut candidates = BTreeSet::new();
 
-    collect_mentioned_paths_from_text(&issue.title, &tracked, &mut matches);
+    collect_mentioned_paths_from_text(&issue.title, &tracked, &mut matches, &mut candidates);
     if let Some(body) = issue.body.as_deref() {
-        collect_mentioned_paths_from_text(body, &tracked, &mut matches);
+        collect_mentioned_paths_from_text(body, &tracked, &mut matches, &mut candidates);
     }
     for comment in comments.iter().take(MAX_ISSUE_COMMENTS) {
-        collect_mentioned_paths_from_text(&comment.body, &tracked, &mut matches);
+        collect_mentioned_paths_from_text(&comment.body, &tracked, &mut matches, &mut candidates);
     }
+    collect_related_mentioned_paths(&mut matches, &candidates, tracked_files);
 
     matches
 }
@@ -162,9 +164,11 @@ fn collect_mentioned_paths_from_text(
     text: &str,
     tracked: &HashSet<&str>,
     matches: &mut BTreeSet<String>,
+    candidates: &mut BTreeSet<String>,
 ) {
     for token in text.split_whitespace() {
         for candidate in path_candidate_variants(token) {
+            candidates.insert(candidate.clone());
             if tracked.contains(candidate.as_str()) {
                 matches.insert(candidate);
                 break;
@@ -174,12 +178,7 @@ fn collect_mentioned_paths_from_text(
 }
 
 fn path_candidate_variants(token: &str) -> Vec<String> {
-    let token = token.trim_matches(|ch: char| {
-        matches!(
-            ch,
-            '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>'
-        )
-    });
+    let token = trim_path_token(token);
 
     if token.is_empty() || token.contains("://") {
         return Vec::new();
@@ -204,10 +203,74 @@ fn path_candidate_variants(token: &str) -> Vec<String> {
     variants.into_iter().collect()
 }
 
+fn trim_path_token(mut token: &str) -> &str {
+    loop {
+        let trimmed = token
+            .trim_matches(|ch: char| {
+                matches!(
+                    ch,
+                    '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>'
+                )
+            })
+            .trim_end_matches([',', ';', ':', '!', '?', '.']);
+        if trimmed == token {
+            return trimmed;
+        }
+        token = trimmed;
+    }
+}
+
 fn add_path_candidate_variant(candidate: &str, variants: &mut BTreeSet<String>) {
     let candidate = candidate.strip_prefix("./").unwrap_or(candidate);
+    let candidate = candidate.trim_end_matches('/');
     if !candidate.is_empty() && is_safe_repo_relative_path(candidate) {
         variants.insert(candidate.to_owned());
+    }
+}
+
+fn collect_related_mentioned_paths(
+    matches: &mut BTreeSet<String>,
+    candidates: &BTreeSet<String>,
+    tracked_files: &[String],
+) {
+    let candidates = candidates.iter().cloned().collect::<Vec<_>>();
+    let mentioned_dirs = candidates
+        .iter()
+        .filter(|path| {
+            tracked_files
+                .iter()
+                .any(|tracked| tracked.starts_with(&format!("{path}/")))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let mentioned_file_names = candidates
+        .iter()
+        .filter(|path| !path.contains('/'))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    for dir in &mentioned_dirs {
+        if mentions_readme(&candidates) {
+            insert_tracked_file_if_present(matches, tracked_files, &format!("{dir}/README.md"));
+        }
+
+        for file_name in &mentioned_file_names {
+            insert_tracked_file_if_present(matches, tracked_files, &format!("{dir}/{file_name}"));
+        }
+    }
+}
+
+fn mentions_readme(paths: &[String]) -> bool {
+    paths.iter().any(|path| path.eq_ignore_ascii_case("readme"))
+}
+
+fn insert_tracked_file_if_present(
+    matches: &mut BTreeSet<String>,
+    tracked_files: &[String],
+    path: &str,
+) {
+    if tracked_files.iter().any(|tracked| tracked == path) {
+        matches.insert(path.to_owned());
     }
 }
 
@@ -423,6 +486,16 @@ fn truncate_text(value: &str, max_chars: usize) -> String {
 
 fn is_sensitive_path(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
+    let file_name = Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+
+    if is_allowed_env_example(&file_name) {
+        return false;
+    }
+
     lower == ".env"
         || lower.starts_with(".env.")
         || lower.contains("/.env")
@@ -430,6 +503,10 @@ fn is_sensitive_path(path: &str) -> bool {
         || lower.ends_with(".key")
         || lower.contains("secret")
         || lower.contains("token")
+}
+
+fn is_allowed_env_example(file_name: &str) -> bool {
+    matches!(file_name, ".env.example" | ".env.sample" | ".env.template")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -563,6 +640,32 @@ mod tests {
         assert!(paths.contains("docs/2.md"));
         assert!(paths.contains("services/coding/src/model.rs"));
         assert!(paths.contains("services/coding/src/worker.rs"));
+    }
+
+    #[test]
+    fn mentioned_directory_and_file_name_match_tracked_file() {
+        let issue = test_issue(
+            "services/coding: update README",
+            Some("Update `services/coding/` using `.env.example`."),
+        );
+        let tracked_files = vec![
+            "services/coding/.env.example".to_owned(),
+            "services/coding/README.md".to_owned(),
+        ];
+
+        let paths = mentioned_paths(&issue, &[], &tracked_files);
+
+        assert!(paths.contains("services/coding/.env.example"));
+        assert!(paths.contains("services/coding/README.md"));
+    }
+
+    #[test]
+    fn env_examples_are_not_sensitive_but_real_env_files_are() {
+        assert!(!is_sensitive_path("services/coding/.env.example"));
+        assert!(!is_sensitive_path("services/coding/.env.sample"));
+        assert!(!is_sensitive_path("services/coding/.env.template"));
+        assert!(is_sensitive_path("services/coding/.env"));
+        assert!(is_sensitive_path("services/coding/.env.local"));
     }
 
     #[test]
