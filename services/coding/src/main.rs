@@ -111,25 +111,28 @@ async fn main() -> anyhow::Result<()> {
 
 fn print_issue_status(status: &worker::IssueStatus) {
     let active_run_id = status.active_run.as_ref().map(|run| run.run_id.as_str());
-    let active_trigger = status
-        .active_run
-        .as_ref()
-        .map(|run| run.trigger.to_string());
+    let active_trigger = status.active_run.as_ref().map(|run| run.trigger);
     let latest = status.latest_state.as_ref();
+    let latest_run_id = latest.map(|run| run.run_id.as_str());
+    let latest_status = latest.map(|run| run.status);
+    let branch = latest.and_then(|run| run.branch_name.as_deref());
+    let plan = latest.and_then(|run| run.plan_path.as_deref());
+    let error = latest.and_then(|run| run.error.as_deref());
+    let pr = latest.and_then(|run| run.pr_url.as_deref());
 
     info!(
         repo = %status.repo,
         issue = status.issue_number,
         issue_dir = %status.issue_dir.display(),
         cancel_requested = status.cancel_requested,
-        active_run_id,
-        active_trigger,
-        latest_run_id = latest.map(|run| run.run_id.as_str()),
-        latest_status = latest.map(|run| run.status.to_string()),
-        branch = latest.and_then(|run| run.branch_name.as_deref()),
-        plan = latest.and_then(|run| run.plan_path.as_ref()).map(|path| path.display().to_string()),
-        error = latest.and_then(|run| run.error.as_deref()),
-        pr = latest.and_then(|run| run.pr_url.as_deref()),
+        ?active_run_id,
+        ?active_trigger,
+        ?latest_run_id,
+        ?latest_status,
+        ?branch,
+        ?plan,
+        ?error,
+        ?pr,
         "issue run status"
     );
 }

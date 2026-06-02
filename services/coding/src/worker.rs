@@ -65,6 +65,15 @@ pub enum RunStatus {
     Failed,
 }
 
+impl RunStatus {
+    fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Completed | Self::Blocked | Self::Cancelled | Self::Failed
+        )
+    }
+}
+
 impl fmt::Display for RunStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -133,6 +142,8 @@ struct CancelRequest {
     requested_at: String,
 }
 
+const STALE_LOCK_GRACE_SECS: u64 = 10 * 60;
+
 pub async fn claim_issue_run(
     config: &AppConfig,
     trigger: IssueTrigger,
@@ -165,16 +176,35 @@ pub async fn claim_issue_run(
         created_at: now_rfc3339(),
     };
 
-    match create_active_lock(&lock_path, &active_run).await {
-        Ok(()) => {}
-        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-            return Ok(RunClaimDecision::Duplicate {
-                reason: "active run already exists".to_owned(),
-                active_run: read_active_run(&lock_path).await.ok().flatten(),
-            });
-        }
-        Err(err) => {
-            return Err(err).with_context(|| format!("failed to create {}", lock_path.display()));
+    let mut recovered_stale_lock = false;
+    loop {
+        match create_active_lock(&lock_path, &active_run).await {
+            Ok(()) => break,
+            Err(err) if err.kind() == ErrorKind::AlreadyExists && !recovered_stale_lock => {
+                let active_run = read_active_run(&lock_path).await?;
+                if let Some(active_run) = active_run.as_ref() {
+                    if recover_stale_active_lock(config, &issue_dir, &lock_path, active_run).await?
+                    {
+                        recovered_stale_lock = true;
+                        continue;
+                    }
+                }
+
+                return Ok(RunClaimDecision::Duplicate {
+                    reason: "active run already exists".to_owned(),
+                    active_run,
+                });
+            }
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+                return Ok(RunClaimDecision::Duplicate {
+                    reason: "active run already exists".to_owned(),
+                    active_run: read_active_run(&lock_path).await.ok().flatten(),
+                });
+            }
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("failed to create {}", lock_path.display()));
+            }
         }
     }
 
@@ -415,6 +445,7 @@ async fn run_issue_triggered_inner(config: AppConfig, claim: &RunClaim) -> anyho
     )
     .await;
 
+    ensure_not_cancelled(claim).await?;
     state.status = RunStatus::Completed;
     state.updated_at = now_rfc3339();
     write_state(&claim.run_dir, &state).await?;
@@ -503,6 +534,21 @@ async fn mark_terminal(
     write_state(run_dir, &state).await
 }
 
+async fn read_run_state(run_dir: &Path) -> anyhow::Result<Option<RunState>> {
+    let state_path = run_dir.join("state.json");
+    let body = match tokio::fs::read(&state_path).await {
+        Ok(body) => body,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read {}", state_path.display()));
+        }
+    };
+
+    serde_json::from_slice(&body)
+        .map(Some)
+        .with_context(|| format!("failed to parse {}", state_path.display()))
+}
+
 async fn latest_run_state(issue_dir: &Path) -> anyhow::Result<Option<RunState>> {
     let mut entries = match tokio::fs::read_dir(issue_dir).await {
         Ok(entries) => entries,
@@ -526,14 +572,11 @@ async fn latest_run_state(issue_dir: &Path) -> anyhow::Result<Option<RunState>> 
             continue;
         }
 
-        let state_path = entry.path().join("state.json");
-        let Ok(body) = tokio::fs::read(&state_path).await else {
-            continue;
-        };
-        let state = match serde_json::from_slice::<RunState>(&body) {
-            Ok(state) => state,
+        let state = match read_run_state(&entry.path()).await {
+            Ok(Some(state)) => state,
+            Ok(None) => continue,
             Err(err) => {
-                warn!(path = %state_path.display(), error = %err, "ignored invalid run state");
+                warn!(path = %entry.path().display(), error = %err, "ignored invalid run state");
                 continue;
             }
         };
@@ -545,6 +588,88 @@ async fn latest_run_state(issue_dir: &Path) -> anyhow::Result<Option<RunState>> 
     }
 
     Ok(latest)
+}
+
+async fn recover_stale_active_lock(
+    config: &AppConfig,
+    issue_dir: &Path,
+    lock_path: &Path,
+    active_run: &ActiveRun,
+) -> anyhow::Result<bool> {
+    let Some(reason) = stale_active_lock_reason(config, issue_dir, active_run).await? else {
+        return Ok(false);
+    };
+
+    warn!(
+        repo = %active_run.repo,
+        issue = active_run.issue_number,
+        run_id = %active_run.run_id,
+        %reason,
+        "recovering stale active run lock"
+    );
+    release_active_lock(lock_path, &active_run.run_id).await?;
+    Ok(true)
+}
+
+async fn stale_active_lock_reason(
+    config: &AppConfig,
+    issue_dir: &Path,
+    active_run: &ActiveRun,
+) -> anyhow::Result<Option<String>> {
+    let run_dir = run_dir_for_issue_dir(issue_dir, &active_run.run_id);
+
+    match read_run_state(&run_dir).await {
+        Ok(Some(state)) if state.status.is_terminal() => {
+            return Ok(Some(format!(
+                "active lock references terminal run status `{}`",
+                state.status
+            )));
+        }
+        Ok(_) => {}
+        Err(err) => {
+            warn!(
+                run_id = %active_run.run_id,
+                path = %run_dir.display(),
+                error = %err,
+                "failed to inspect active run state for stale lock recovery"
+            );
+        }
+    }
+
+    let stale_after = stale_lock_after(config);
+    let Some(age) = active_lock_age(active_run) else {
+        return Ok(Some("active lock has invalid created_at".to_owned()));
+    };
+
+    if age > stale_after {
+        return Ok(Some(format!(
+            "active lock age {}s exceeds stale threshold {}s",
+            age.as_secs(),
+            stale_after.as_secs()
+        )));
+    }
+
+    Ok(None)
+}
+
+fn stale_lock_after(config: &AppConfig) -> Duration {
+    Duration::from_secs(
+        config
+            .workspace
+            .max_run_minutes
+            .saturating_mul(60)
+            .saturating_add(STALE_LOCK_GRACE_SECS),
+    )
+}
+
+fn active_lock_age(active_run: &ActiveRun) -> Option<Duration> {
+    let created_at = chrono::DateTime::parse_from_rfc3339(&active_run.created_at)
+        .ok()?
+        .with_timezone(&chrono::Utc);
+    chrono::Utc::now()
+        .signed_duration_since(created_at)
+        .to_std()
+        .ok()
 }
 
 async fn create_active_lock(lock_path: &Path, active_run: &ActiveRun) -> std::io::Result<()> {
@@ -862,6 +987,43 @@ mod tests {
         assert_eq!(active_run.unwrap().run_id, "delivery-1");
 
         release_active_lock(&claim.lock_path, claim.trigger.run_id.as_str())
+            .await
+            .unwrap();
+        cleanup(root);
+    }
+
+    #[tokio::test]
+    async fn claim_recovers_lock_for_terminal_run() {
+        let root = temp_dir("stale-lock");
+        let config = test_config(root.join("runs"));
+        let repo = RepoRef::parse("cachebag/rafael").unwrap();
+        let old_trigger = test_trigger("delivery-old");
+        let new_trigger = test_trigger("delivery-new");
+
+        let old_decision = claim_issue_run(&config, old_trigger, None).await.unwrap();
+        let RunClaimDecision::Claimed(old_claim) = old_decision else {
+            panic!("expected old run claim");
+        };
+        write_state(
+            &old_claim.run_dir,
+            &test_state("delivery-old", &repo, "2026-01-01T00:00:00+00:00"),
+        )
+        .await
+        .unwrap();
+
+        let new_decision = claim_issue_run(&config, new_trigger, None).await.unwrap();
+        let RunClaimDecision::Claimed(new_claim) = new_decision else {
+            panic!("expected stale lock recovery and new run claim");
+        };
+        assert_eq!(new_claim.trigger.run_id, "delivery-new");
+
+        let active_run = read_active_run(&new_claim.lock_path)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(active_run.run_id, "delivery-new");
+
+        release_active_lock(&new_claim.lock_path, new_claim.trigger.run_id.as_str())
             .await
             .unwrap();
         cleanup(root);
