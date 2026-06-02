@@ -656,6 +656,8 @@ mod tests {
                 blocking_labels: vec!["blocked".to_owned()],
                 enable_assignment_trigger: false,
                 api_base_url: "https://api.github.com".to_owned(),
+                git_author_name: "netshared[bot]".to_owned(),
+                git_author_email: "1+netshared[bot]@users.noreply.github.com".to_owned(),
             },
             workspace: WorkspaceConfig {
                 workdir: PathBuf::from("/tmp/work"),
@@ -669,6 +671,7 @@ mod tests {
                 max_changed_files: 12,
                 verification_command_timeout_seconds: 600,
                 verification_total_timeout_seconds: 1_200,
+                allow_unverified_publish: false,
             },
             server: ServerConfig {
                 bind: "127.0.0.1:0".parse().unwrap(),

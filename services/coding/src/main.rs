@@ -2,6 +2,7 @@ mod change_execution;
 mod config;
 mod github;
 mod model;
+mod publish;
 mod repo_context;
 mod server;
 mod types;
@@ -87,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
                 max_changed_files = config.workspace.max_changed_files,
                 verification_command_timeout_seconds = config.workspace.verification_command_timeout_seconds,
                 verification_total_timeout_seconds = config.workspace.verification_total_timeout_seconds,
+                allow_unverified_publish = config.workspace.allow_unverified_publish,
                 "configuration loaded"
             );
             Ok(())
