@@ -24,25 +24,27 @@ cargo run -- check-config
 ## Environment Variables
 The following environment variables are required to configure `netshared` as a collaborator. You can find these in the `.env.example` file.
 
-- `RAFAEL_MODEL_BASE_URL`
-- `RAFAEL_MODEL_NAME`
-- `RAFAEL_GITHUB_APP_ID`
-- `RAFAEL_GITHUB_APP_INSTALLATION_ID`
-- `RAFAEL_GITHUB_APP_PRIVATE_KEY_PATH`
-- `RAFAEL_GITHUB_WEBHOOK_SECRET`
-- `RAFAEL_GITHUB_APP_SLUG`
-- `RAFAEL_COLLABORATOR_LOGIN`
-- `RAFAEL_ALLOWED_REPOS`
-- `RAFAEL_GITHUB_API_BASE_URL`
-- `RAFAEL_GIT_AUTHOR_NAME`
-- `RAFAEL_GIT_AUTHOR_EMAIL`
-- `RAFAEL_IMPLEMENT_LABEL`
-- `RAFAEL_COMMAND_MENTION`
-- `RAFAEL_TRUSTED_USERS`
-- `RAFAEL_BLOCKING_LABELS`
-- `RAFAEL_ENABLE_ASSIGNMENT_TRIGGER`
-- `RAFAEL_QUIET_COMMENTS`
-- `RAFAEL_WORKDIR`
-- `RAFAEL_RUNS_DIR`
-- `RAFAEL_MAX_RUN_MINUTES`
-- `RAFAEL_BIND`
+| Variable Name | Description |
+|---------------|-------------|
+| `RAFAEL_MODEL_BASE_URL` | Base URL for the model |
+| `RAFAEL_MODEL_NAME` | Name of the model |
+| `RAFAEL_GITHUB_APP_ID` | GitHub App ID |
+| `RAFAEL_GITHUB_APP_INSTALLATION_ID` | GitHub App Installation ID |
+| `RAFAEL_GITHUB_APP_PRIVATE_KEY_PATH` | Path to the GitHub App private key |
+| `RAFAEL_GITHUB_WEBHOOK_SECRET` | Secret for GitHub webhooks |
+| `RAFAEL_GITHUB_APP_SLUG` | GitHub App slug |
+| `RAFAEL_COLLABORATOR_LOGIN` | Collaborator login |
+| `RAFAEL_ALLOWED_REPOS` | Allowed repositories |
+| `RAFAEL_GITHUB_API_BASE_URL` | Base URL for GitHub API |
+| `RAFAEL_GIT_AUTHOR_NAME` | Git author name |
+| `RAFAEL_GIT_AUTHOR_EMAIL` | Git author email |
+| `RAFAEL_IMPLEMENT_LABEL` | Implement label |
+| `RAFAEL_COMMAND_MENTION` | Command mention |
+| `RAFAEL_TRUSTED_USERS` | Trusted users |
+| `RAFAEL_BLOCKING_LABELS` | Blocking labels |
+| `RAFAEL_ENABLE_ASSIGNMENT_TRIGGER` | Enable assignment trigger |
+| `RAFAEL_QUIET_COMMENTS` | Quiet comments |
+| `RAFAEL_WORKDIR` | Working directory |
+| `RAFAEL_RUNS_DIR` | Runs directory |
+| `RAFAEL_MAX_RUN_MINUTES` | Maximum run minutes |
+| `RAFAEL_BIND` | Bind address |
