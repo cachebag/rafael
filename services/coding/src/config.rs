@@ -39,6 +39,11 @@ pub struct WorkspaceConfig {
     pub runs_dir: PathBuf,
     pub max_run_minutes: u64,
     pub verify_commands: Vec<String>,
+    pub max_tool_iterations: usize,
+    pub max_tool_runtime_seconds: u64,
+    pub max_file_read_bytes: u64,
+    pub max_write_bytes: usize,
+    pub max_changed_files: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +108,21 @@ impl AppConfig {
                     .parse()
                     .context("RAFAEL_MAX_RUN_MINUTES must be an integer")?,
                 verify_commands: split_command_list(&env_or("RAFAEL_VERIFY_COMMANDS", "")),
+                max_tool_iterations: env_or("RAFAEL_MAX_TOOL_ITERATIONS", "24")
+                    .parse()
+                    .context("RAFAEL_MAX_TOOL_ITERATIONS must be an integer")?,
+                max_tool_runtime_seconds: env_or("RAFAEL_MAX_TOOL_RUNTIME_SECONDS", "900")
+                    .parse()
+                    .context("RAFAEL_MAX_TOOL_RUNTIME_SECONDS must be an integer")?,
+                max_file_read_bytes: env_or("RAFAEL_MAX_FILE_READ_BYTES", "131072")
+                    .parse()
+                    .context("RAFAEL_MAX_FILE_READ_BYTES must be an integer")?,
+                max_write_bytes: env_or("RAFAEL_MAX_WRITE_BYTES", "262144")
+                    .parse()
+                    .context("RAFAEL_MAX_WRITE_BYTES must be an integer")?,
+                max_changed_files: env_or("RAFAEL_MAX_CHANGED_FILES", "12")
+                    .parse()
+                    .context("RAFAEL_MAX_CHANGED_FILES must be an integer")?,
                 workdir,
             },
             server: ServerConfig {
