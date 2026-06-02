@@ -118,6 +118,16 @@ pub struct PullRequestReviewComment {
     pub user: IssueCommentUser,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PullRequestFile {
+    pub filename: String,
+    pub status: String,
+    pub additions: u64,
+    pub deletions: u64,
+    pub changes: u64,
+    pub patch: Option<String>,
+}
+
 impl GitHubClient {
     pub fn new(config: &GitHubConfig) -> anyhow::Result<Self> {
         Ok(Self {
@@ -244,6 +254,19 @@ impl GitHubClient {
         );
         self.get_json(token, url, "pull request review comments")
             .await
+    }
+
+    pub async fn pull_request_files(
+        &self,
+        token: &InstallationToken,
+        repo: &RepoRef,
+        pull_number: u64,
+    ) -> anyhow::Result<Vec<PullRequestFile>> {
+        let url = format!(
+            "{}/repos/{repo}/pulls/{pull_number}/files?per_page=100",
+            self.api_base_url
+        );
+        self.get_json(token, url, "pull request files").await
     }
 
     pub async fn open_pull_request_for_branch(

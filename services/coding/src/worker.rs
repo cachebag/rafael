@@ -17,7 +17,7 @@ use crate::{
     config::AppConfig,
     github::{
         GitHubClient, InstallationToken, IssueComment, IssueInfo, PullRequestDetails,
-        PullRequestReview, PullRequestReviewComment, RepositoryInfo,
+        PullRequestFile, PullRequestReview, PullRequestReviewComment, RepositoryInfo,
     },
     model::ModelClient,
     publish::{
@@ -392,6 +392,17 @@ async fn run_pull_request_revision_inner(
     let issue_comments = github
         .issue_comments(&token, &trigger.repo, trigger.pull_number)
         .await?;
+    let pull_request_files = github
+        .pull_request_files(&token, &trigger.repo, trigger.pull_number)
+        .await?;
+    let pull_request_state = PullRequestState::from_github(&pull_request, pull_request_files);
+    let pull_request_state_path = run_dir.join("pr-state.json");
+    let pull_request_state_body =
+        serde_json::to_vec_pretty(&pull_request_state).context("failed to serialize PR state")?;
+    tokio::fs::write(&pull_request_state_path, pull_request_state_body)
+        .await
+        .with_context(|| format!("failed to write {}", pull_request_state_path.display()))?;
+
     let feedback = collect_pull_request_feedback(
         &config,
         &github,
@@ -455,7 +466,7 @@ async fn run_pull_request_revision_inner(
     state.updated_at = now_rfc3339();
     write_state(&run_dir, &state).await?;
 
-    let plan = pull_request_revision_plan(&pull_request, &feedback);
+    let plan = pull_request_revision_plan(&pull_request_state, &feedback);
     let plan_path = run_dir.join("plan.md");
     tokio::fs::write(&plan_path, &plan)
         .await
@@ -902,6 +913,63 @@ struct PullRequestFeedback {
     conversation_comments: Vec<IssueComment>,
 }
 
+#[derive(Debug, Serialize)]
+struct PullRequestState {
+    number: u64,
+    title: String,
+    body: Option<String>,
+    html_url: String,
+    base_ref: String,
+    head_ref: String,
+    head_sha: String,
+    changed_files: Vec<PullRequestStateFile>,
+}
+
+impl PullRequestState {
+    fn from_github(pull_request: &PullRequestDetails, files: Vec<PullRequestFile>) -> Self {
+        Self {
+            number: pull_request.number,
+            title: pull_request.title.clone(),
+            body: pull_request.body.clone(),
+            html_url: pull_request.html_url.clone(),
+            base_ref: pull_request.base.ref_name.clone(),
+            head_ref: pull_request.head.ref_name.clone(),
+            head_sha: pull_request.head.sha.clone(),
+            changed_files: files
+                .into_iter()
+                .take(MAX_PULL_REQUEST_FILES)
+                .map(PullRequestStateFile::from_github)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct PullRequestStateFile {
+    path: String,
+    status: String,
+    additions: u64,
+    deletions: u64,
+    changes: u64,
+    patch: Option<String>,
+    patch_truncated: bool,
+}
+
+impl PullRequestStateFile {
+    fn from_github(file: PullRequestFile) -> Self {
+        let (patch, patch_truncated) = truncate_optional_patch(file.patch);
+        Self {
+            path: file.filename,
+            status: file.status,
+            additions: file.additions,
+            deletions: file.deletions,
+            changes: file.changes,
+            patch,
+            patch_truncated,
+        }
+    }
+}
+
 fn publish_completed_comment(pr_url: &str, commit_sha: &str, created: bool) -> String {
     let action = if created { "Created" } else { "Updated" };
     format!("{action} pull request: {pr_url}\n\nCommit: `{commit_sha}`")
@@ -1044,23 +1112,44 @@ async fn collect_pull_request_feedback(
     })
 }
 
-fn pull_request_revision_plan(
-    pull_request: &PullRequestDetails,
-    feedback: &PullRequestFeedback,
-) -> String {
+fn pull_request_revision_plan(state: &PullRequestState, feedback: &PullRequestFeedback) -> String {
     format!(
-        "Revise existing pull request #{} on branch `{}`.\n\nDo not create a new branch or a new pull request. Address the trusted PR review feedback below, keep the change scoped, and update the existing branch. If the feedback is missing, ambiguous, or conflicts with repository safety, return done with status blocked and ask a concrete question.\n\nPull request title:\n{}\n\nPull request body:\n{}\n\nTrusted review feedback:\n{}",
-        pull_request.number,
-        pull_request.head.ref_name,
-        pull_request.title,
-        truncate_feedback_text(
-            pull_request
-                .body
-                .as_deref()
-                .unwrap_or("(no pull request body)")
-        ),
+        "Revise existing pull request #{} on branch `{}`.\n\nDo not create a new branch or a new pull request. The current GitHub PR state below is the source of truth at the start of this run; do not infer PR state from previous failed local run artifacts. Address the trusted PR review feedback against that PR state, keep the change scoped, and update the existing branch. If feedback asks to revert a file, remove that file's changes from the PR diff. If the feedback is missing, ambiguous, or conflicts with repository safety, return done with status blocked and ask a concrete question.\n\nPull request title:\n{}\n\nPull request body:\n{}\n\nCurrent GitHub PR state:\n{}\n\nTrusted review feedback:\n{}",
+        state.number,
+        state.head_ref,
+        state.title,
+        truncate_feedback_text(state.body.as_deref().unwrap_or("(no pull request body)")),
+        pull_request_state_for_plan(state),
         feedback_for_plan(feedback)
     )
+}
+
+fn pull_request_state_for_plan(state: &PullRequestState) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "- Base: `{}`; head: `{}` at `{}`",
+        state.base_ref, state.head_ref, state.head_sha
+    ));
+    if state.changed_files.is_empty() {
+        lines.push("- Changed files: (none reported by GitHub)".to_owned());
+        return lines.join("\n");
+    }
+
+    lines.push("- Changed files:".to_owned());
+    for file in &state.changed_files {
+        lines.push(format!(
+            "  - `{}` status={} +{} -{} changes={}",
+            file.path, file.status, file.additions, file.deletions, file.changes
+        ));
+        if let Some(patch) = file.patch.as_deref() {
+            lines.push(format!("    Patch:\n{}", indent_patch_for_plan(patch)));
+            if file.patch_truncated {
+                lines.push("    [patch truncated]".to_owned());
+            }
+        }
+    }
+
+    lines.join("\n")
 }
 
 fn feedback_for_plan(feedback: &PullRequestFeedback) -> String {
@@ -1118,6 +1207,28 @@ fn truncate_feedback_text(value: &str) -> String {
         truncated.push_str("...");
         truncated
     }
+}
+
+fn truncate_optional_patch(value: Option<String>) -> (Option<String>, bool) {
+    let Some(value) = value else {
+        return (None, false);
+    };
+    if value.chars().count() <= MAX_PULL_REQUEST_PATCH_CHARS {
+        return (Some(value), false);
+    }
+
+    (
+        Some(value.chars().take(MAX_PULL_REQUEST_PATCH_CHARS).collect()),
+        true,
+    )
+}
+
+fn indent_patch_for_plan(patch: &str) -> String {
+    patch
+        .lines()
+        .map(|line| format!("    {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn run_dir(config: &AppConfig, trigger: &IssueTrigger) -> PathBuf {
@@ -1445,6 +1556,8 @@ fn is_safe_branch_name(branch_name: &str) -> bool {
 
 const MAX_FEEDBACK_ITEMS: usize = 30;
 const MAX_FEEDBACK_CHARS: usize = 2_000;
+const MAX_PULL_REQUEST_FILES: usize = 40;
+const MAX_PULL_REQUEST_PATCH_CHARS: usize = 4_000;
 
 #[cfg(test)]
 mod tests {
@@ -1479,5 +1592,41 @@ mod tests {
     #[test]
     fn safe_path_component_strips_separators() {
         assert_eq!(safe_path_component("../abc/def"), "abc-def");
+    }
+
+    #[test]
+    fn revision_plan_includes_current_pull_request_state() {
+        let state = PullRequestState {
+            number: 12,
+            title: "services/coding: operations setup".to_owned(),
+            body: Some("Issue: https://example.test/issues/10".to_owned()),
+            html_url: "https://example.test/pulls/12".to_owned(),
+            base_ref: "master".to_owned(),
+            head_ref: "work/issue-10-services-coding-operations-setup".to_owned(),
+            head_sha: "abc123".to_owned(),
+            changed_files: vec![PullRequestStateFile {
+                path: "README.md".to_owned(),
+                status: "modified".to_owned(),
+                additions: 22,
+                deletions: 0,
+                changes: 22,
+                patch: Some("@@ -1 +1 @@\n+Systemd docs".to_owned()),
+                patch_truncated: false,
+            }],
+        };
+        let feedback = PullRequestFeedback {
+            reviews: Vec::new(),
+            review_comments: Vec::new(),
+            conversation_comments: Vec::new(),
+        };
+
+        let plan = pull_request_revision_plan(&state, &feedback);
+
+        assert!(plan.contains("Current GitHub PR state"));
+        assert!(
+            plan.contains("Base: `master`; head: `work/issue-10-services-coding-operations-setup`")
+        );
+        assert!(plan.contains("`README.md` status=modified +22 -0 changes=22"));
+        assert!(plan.contains("+Systemd docs"));
     }
 }
