@@ -548,7 +548,7 @@ fn verification_skipped_comment(branch_name: &str, changed_files: &[String]) -> 
 
 fn verification_failed_comment(branch_name: &str, summary: &str) -> String {
     format!(
-        "Prepared branch `{branch_name}`, but verification failed after the bounded repair policy.\n\nSummary:\n{summary}\n\nCommand logs were saved under the run's `verification/` artifact directory."
+        "Prepared branch `{branch_name}`, but verification failed.\n\nSummary:\n{summary}\n\nCommand logs were saved under the run's `verification/` artifact directory."
     )
 }
 
