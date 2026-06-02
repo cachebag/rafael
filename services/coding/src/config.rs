@@ -31,6 +31,8 @@ pub struct GitHubConfig {
     pub blocking_labels: Vec<String>,
     pub enable_assignment_trigger: bool,
     pub api_base_url: String,
+    pub git_author_name: String,
+    pub git_author_email: String,
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +48,7 @@ pub struct WorkspaceConfig {
     pub max_changed_files: usize,
     pub verification_command_timeout_seconds: u64,
     pub verification_total_timeout_seconds: u64,
+    pub allow_unverified_publish: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +60,10 @@ impl AppConfig {
     pub fn from_env() -> anyhow::Result<Self> {
         let app_slug = env_or("RAFAEL_GITHUB_APP_SLUG", "netshared");
         let workdir = PathBuf::from(env_or("RAFAEL_WORKDIR", "/var/lib/rafael/worktrees"));
+        let app_id = required_env("RAFAEL_GITHUB_APP_ID")?
+            .parse()
+            .context("RAFAEL_GITHUB_APP_ID must be an integer")?;
+        let collaborator_login = env_or("RAFAEL_COLLABORATOR_LOGIN", &format!("{app_slug}[bot]"));
 
         Ok(Self {
             model: ModelConfig {
@@ -67,9 +74,7 @@ impl AppConfig {
                 ),
             },
             github: GitHubConfig {
-                app_id: required_env("RAFAEL_GITHUB_APP_ID")?
-                    .parse()
-                    .context("RAFAEL_GITHUB_APP_ID must be an integer")?,
+                app_id,
                 installation_id: optional_env("RAFAEL_GITHUB_APP_INSTALLATION_ID")
                     .map(|value| {
                         value
@@ -81,10 +86,7 @@ impl AppConfig {
                     "RAFAEL_GITHUB_APP_PRIVATE_KEY_PATH",
                 )?),
                 webhook_secret: optional_env("RAFAEL_GITHUB_WEBHOOK_SECRET"),
-                collaborator_login: env_or(
-                    "RAFAEL_COLLABORATOR_LOGIN",
-                    &format!("{app_slug}[bot]"),
-                ),
+                collaborator_login: collaborator_login.clone(),
                 allowed_repos: split_csv(&required_env("RAFAEL_ALLOWED_REPOS")?),
                 implementation_label: env_or("RAFAEL_IMPLEMENT_LABEL", "netshared:implement"),
                 command_mention: env::var("RAFAEL_COMMAND_MENTION")
@@ -99,6 +101,11 @@ impl AppConfig {
                     false,
                 )?,
                 api_base_url: env_or("RAFAEL_GITHUB_API_BASE_URL", "https://api.github.com"),
+                git_author_name: env_or("RAFAEL_GIT_AUTHOR_NAME", &collaborator_login),
+                git_author_email: env_or(
+                    "RAFAEL_GIT_AUTHOR_EMAIL",
+                    &format!("{app_id}+{collaborator_login}@users.noreply.github.com"),
+                ),
                 app_slug,
             },
             workspace: WorkspaceConfig {
@@ -137,6 +144,7 @@ impl AppConfig {
                 )
                 .parse()
                 .context("RAFAEL_VERIFY_TOTAL_TIMEOUT_SECONDS must be an integer")?,
+                allow_unverified_publish: parse_bool_env("RAFAEL_ALLOW_UNVERIFIED_PUBLISH", false)?,
                 workdir,
             },
             server: ServerConfig {
