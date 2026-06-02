@@ -1,0 +1,12 @@
+[Unit]
+Description=Services Coding Service
+After=network.target
+
+[Service]
+User=cachebag
+ExecStart=/home/cachebag/rafael/target/release/coding serve
+EnvironmentFile=/home/cachebag/.config/rafael/coding.env
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

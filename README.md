@@ -26,3 +26,25 @@ infra/systemd/llama-server.service
 
 # License 
 MIT 
+
+## Managing the Services Coding Service
+
+### Enable the Service
+```bash
+systemctl --user enable rafael-coding.service
+```
+
+### Start the Service
+```bash
+systemctl --user start rafael-coding.service
+```
+
+### Restart the Service
+```bash
+systemctl --user restart rafael-coding.service
+```
+
+### View Logs
+```bash
+journalctl --user -u rafael-coding.service
+```
