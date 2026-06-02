@@ -30,6 +30,7 @@ pub struct GitHubConfig {
     pub trusted_users: Vec<String>,
     pub blocking_labels: Vec<String>,
     pub enable_assignment_trigger: bool,
+    pub quiet_comments: bool,
     pub api_base_url: String,
     pub git_author_name: String,
     pub git_author_email: String,
@@ -100,6 +101,7 @@ impl AppConfig {
                     "RAFAEL_ENABLE_ASSIGNMENT_TRIGGER",
                     false,
                 )?,
+                quiet_comments: parse_bool_env("RAFAEL_QUIET_COMMENTS", false)?,
                 api_base_url: env_or("RAFAEL_GITHUB_API_BASE_URL", "https://api.github.com"),
                 git_author_name: env_or("RAFAEL_GIT_AUTHOR_NAME", &collaborator_login),
                 git_author_email: env_or(

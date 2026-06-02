@@ -67,9 +67,7 @@ pub struct PublishPullRequestRequest<'a> {
     pub issue: &'a IssueInfo,
     pub branch_name: &'a str,
     pub checkout_path: &'a Path,
-    pub commit_sha: &'a str,
     pub implementation_summary: Option<&'a str>,
-    pub run_id: &'a str,
     pub existing_pull_request: Option<ExistingPullRequest<'a>>,
 }
 
@@ -84,18 +82,6 @@ pub async fn publish_pull_request(
     push_branch(request.checkout_path, request.token, request.branch_name).await?;
 
     if let Some(existing) = request.existing_pull_request {
-        request
-            .github
-            .post_issue_comment(
-                request.token,
-                request.repo_ref,
-                existing.number,
-                &format!(
-                    "Updated this pull request from run `{}` at commit `{}`.",
-                    request.run_id, request.commit_sha
-                ),
-            )
-            .await?;
         return Ok(PublishPullRequestOutcome {
             pr_number: existing.number,
             pr_url: existing.html_url.to_owned(),
@@ -124,18 +110,6 @@ pub async fn publish_pull_request(
                 existing.number,
                 &title,
                 &body,
-            )
-            .await?;
-        request
-            .github
-            .post_issue_comment(
-                request.token,
-                request.repo_ref,
-                existing.number,
-                &format!(
-                    "Updated this pull request from run `{}` at commit `{}`.",
-                    request.run_id, request.commit_sha
-                ),
             )
             .await?;
         return Ok(PublishPullRequestOutcome {

@@ -165,17 +165,19 @@ async fn run_issue_triggered_inner(config: AppConfig, trigger: IssueTrigger) -> 
         bail!("issue #{} is a pull request, not an issue", issue.number);
     }
 
-    post_comment_best_effort(
-        &github,
-        &token,
-        &trigger.repo,
-        trigger.issue_number,
-        &format!(
-            "Started a coding run for this issue.\n\nRun: `{}`\nTrigger: `{}`",
-            trigger.run_id, trigger.trigger
-        ),
-    )
-    .await;
+    if !config.github.quiet_comments {
+        post_comment_best_effort(
+            &github,
+            &token,
+            &trigger.repo,
+            trigger.issue_number,
+            &format!(
+                "Started a coding run for this issue.\n\nRun: `{}`\nTrigger: `{}`",
+                trigger.run_id, trigger.trigger
+            ),
+        )
+        .await;
+    }
 
     state.issue_title = Some(issue.title.clone());
     state.issue_url = Some(issue.html_url.clone());
@@ -406,17 +408,19 @@ async fn run_pull_request_revision_inner(
         .await
         .with_context(|| format!("failed to write {}", feedback_path.display()))?;
 
-    post_comment_best_effort(
-        &github,
-        &token,
-        &trigger.repo,
-        trigger.pull_number,
-        &format!(
-            "Started a pull request revision run.\n\nRun: `{}`\nTrigger: `{}`",
-            trigger.run_id, trigger.trigger
-        ),
-    )
-    .await;
+    if !config.github.quiet_comments {
+        post_comment_best_effort(
+            &github,
+            &token,
+            &trigger.repo,
+            trigger.pull_number,
+            &format!(
+                "Started a pull request revision run.\n\nRun: `{}`\nTrigger: `{}`",
+                trigger.run_id, trigger.trigger
+            ),
+        )
+        .await;
+    }
 
     let branch_name = pull_request.head.ref_name.clone();
     let worktree_path = prepare_pull_request_worktree(
@@ -647,9 +651,7 @@ async fn run_publish_phase(
         issue: context.issue,
         branch_name: context.branch_name,
         checkout_path: context.worktree_path,
-        commit_sha: &commit.commit_sha,
         implementation_summary: state.implementation_summary.as_deref(),
-        run_id: context.run_id,
         existing_pull_request: context.existing_pull_request.as_ref().map(|pull| {
             ExistingPullRequest {
                 number: pull.number,
@@ -759,14 +761,16 @@ async fn finish_successful_verification(
                     &outcome.summary,
                 )
             };
-            post_comment_best_effort(
-                context.github,
-                context.token,
-                context.repo_ref,
-                context.issue_number,
-                &body,
-            )
-            .await;
+            if !context.config.github.quiet_comments {
+                post_comment_best_effort(
+                    context.github,
+                    context.token,
+                    context.repo_ref,
+                    context.issue_number,
+                    &body,
+                )
+                .await;
+            }
             info!(
                 repo = %context.repo_ref,
                 issue = context.issue_number,
@@ -785,14 +789,18 @@ async fn finish_successful_verification(
             };
             state.updated_at = now_rfc3339();
             write_state(context.run_dir, state).await?;
-            post_comment_best_effort(
-                context.github,
-                context.token,
-                context.repo_ref,
-                context.issue_number,
-                &verification_skipped_comment(context.branch_name, &state.changed_files),
-            )
-            .await;
+            let publish_will_continue =
+                after_repair || context.config.workspace.allow_unverified_publish;
+            if !context.config.github.quiet_comments || !publish_will_continue {
+                post_comment_best_effort(
+                    context.github,
+                    context.token,
+                    context.repo_ref,
+                    context.issue_number,
+                    &verification_skipped_comment(context.branch_name, &state.changed_files),
+                )
+                .await;
+            }
             Ok(true)
         }
         VerificationStatus::Failed | VerificationStatus::TimedOut => Ok(false),
