@@ -34,5 +34,5 @@ This README provides instructions on how to get `llama.cpp` up and running with 
 
 ## Troubleshooting
 - Check the logs for any errors: `journalctl --user -u llama-server`
-- Ensure all environment variables are correctly set. For more information, see [services/coding/README.md](services/coding/README.md).
+- Ensure all environment variables are correctly set. For more information, see [services/coding/README.md](../services/coding/README.md).
 
