@@ -22,17 +22,32 @@ use crate::{
     repo_context::RepoContext,
 };
 
+pub struct ChangeExecutionRequest<'a> {
+    pub config: &'a AppConfig,
+    pub model: &'a ModelClient,
+    pub repo: &'a RepositoryInfo,
+    pub issue: &'a IssueInfo,
+    pub branch_name: &'a str,
+    pub repo_context: &'a RepoContext,
+    pub plan: &'a str,
+    pub checkout_path: &'a Path,
+    pub run_dir: &'a Path,
+}
+
 pub async fn execute_change_loop(
-    config: &AppConfig,
-    model: &ModelClient,
-    repo: &RepositoryInfo,
-    issue: &IssueInfo,
-    branch_name: &str,
-    repo_context: &RepoContext,
-    plan: &str,
-    checkout_path: &Path,
-    run_dir: &Path,
+    request: ChangeExecutionRequest<'_>,
 ) -> anyhow::Result<ChangeExecutionOutcome> {
+    let ChangeExecutionRequest {
+        config,
+        model,
+        repo,
+        issue,
+        branch_name,
+        repo_context,
+        plan,
+        checkout_path,
+        run_dir,
+    } = request;
     let limits = ExecutionLimits::from_config(config);
     let sandbox = RepoSandbox::new(checkout_path).await?;
     let transcript_path = run_dir.join("transcript.jsonl");
@@ -1047,17 +1062,12 @@ enum ChangeAction {
     },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 enum DoneStatus {
+    #[default]
     Completed,
     Blocked,
-}
-
-impl Default for DoneStatus {
-    fn default() -> Self {
-        Self::Completed
-    }
 }
 
 #[derive(Debug)]

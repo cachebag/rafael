@@ -7,7 +7,7 @@ use tokio::{process::Command, time::timeout};
 use tracing::{info, warn};
 
 use crate::{
-    change_execution::{ChangeExecutionStatus, execute_change_loop},
+    change_execution::{ChangeExecutionRequest, ChangeExecutionStatus, execute_change_loop},
     config::AppConfig,
     github::{GitHubClient, InstallationToken, IssueInfo, RepositoryInfo},
     model::ModelClient,
@@ -180,17 +180,17 @@ async fn run_issue_triggered_inner(config: AppConfig, trigger: IssueTrigger) -> 
     state.updated_at = now_rfc3339();
     write_state(&run_dir, &state).await?;
 
-    let outcome = match execute_change_loop(
-        &config,
-        &model,
-        &repo,
-        &issue,
-        &branch_name,
-        &repo_context,
-        &plan,
-        &worktree_path,
-        &run_dir,
-    )
+    let outcome = match execute_change_loop(ChangeExecutionRequest {
+        config: &config,
+        model: &model,
+        repo: &repo,
+        issue: &issue,
+        branch_name: &branch_name,
+        repo_context: &repo_context,
+        plan: &plan,
+        checkout_path: &worktree_path,
+        run_dir: &run_dir,
+    })
     .await
     {
         Ok(outcome) => outcome,
