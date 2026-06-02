@@ -5,6 +5,7 @@ mod model;
 mod repo_context;
 mod server;
 mod types;
+mod verification;
 mod webhook;
 mod worker;
 
@@ -84,6 +85,8 @@ async fn main() -> anyhow::Result<()> {
                 max_file_read_bytes = config.workspace.max_file_read_bytes,
                 max_write_bytes = config.workspace.max_write_bytes,
                 max_changed_files = config.workspace.max_changed_files,
+                verification_command_timeout_seconds = config.workspace.verification_command_timeout_seconds,
+                verification_total_timeout_seconds = config.workspace.verification_total_timeout_seconds,
                 "configuration loaded"
             );
             Ok(())

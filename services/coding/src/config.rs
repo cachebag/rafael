@@ -44,6 +44,8 @@ pub struct WorkspaceConfig {
     pub max_file_read_bytes: u64,
     pub max_write_bytes: usize,
     pub max_changed_files: usize,
+    pub verification_command_timeout_seconds: u64,
+    pub verification_total_timeout_seconds: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +125,18 @@ impl AppConfig {
                 max_changed_files: env_or("RAFAEL_MAX_CHANGED_FILES", "12")
                     .parse()
                     .context("RAFAEL_MAX_CHANGED_FILES must be an integer")?,
+                verification_command_timeout_seconds: env_or(
+                    "RAFAEL_VERIFY_COMMAND_TIMEOUT_SECONDS",
+                    "600",
+                )
+                .parse()
+                .context("RAFAEL_VERIFY_COMMAND_TIMEOUT_SECONDS must be an integer")?,
+                verification_total_timeout_seconds: env_or(
+                    "RAFAEL_VERIFY_TOTAL_TIMEOUT_SECONDS",
+                    "1200",
+                )
+                .parse()
+                .context("RAFAEL_VERIFY_TOTAL_TIMEOUT_SECONDS must be an integer")?,
                 workdir,
             },
             server: ServerConfig {
