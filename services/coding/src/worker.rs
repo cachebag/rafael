@@ -1,6 +1,7 @@
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, process::Stdio, time::Duration};
 
 use anyhow::{Context, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use tokio::{process::Command, time::timeout};
 use tracing::{info, warn};
@@ -274,12 +275,14 @@ async fn run_git_at(
     args: Vec<String>,
 ) -> anyhow::Result<()> {
     let mut command = Command::new("git");
+    let auth_header = git_auth_header(&token.token);
     command
         .current_dir(cwd)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
         .arg("-c")
         .arg(format!(
-            "http.extraHeader=Authorization: Bearer {}",
-            token.token
+            "http.https://github.com/.extraheader={auth_header}"
         ))
         .args(&args);
 
@@ -295,6 +298,11 @@ async fn run_git_at(
     }
 
     Ok(())
+}
+
+fn git_auth_header(token: &str) -> String {
+    let encoded = STANDARD.encode(format!("x-access-token:{token}"));
+    format!("AUTHORIZATION: basic {encoded}")
 }
 
 fn branch_name_for_issue(issue: &IssueInfo) -> String {
