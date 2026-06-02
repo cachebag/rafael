@@ -21,5 +21,3 @@ cargo run -- issue-triggered --repo <repo-ref> --issue <issue-number> --trigger 
 cargo run -- check-config
 ```
 
-
-
