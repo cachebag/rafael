@@ -136,14 +136,14 @@ pub async fn execute_change_loop(
 
         append_transcript(&transcript_path, iteration, "action", &action).await?;
 
-        let action_value = serde_json::to_value(&action).context("failed to serialize action")?;
+        let prompt_action = action.for_prompt();
         let execution =
             execute_action(&action, &sandbox, run_dir, &diff_stat_path, &limits).await?;
 
         append_transcript(&transcript_path, iteration, "result", &execution.result).await?;
         history.push(prompt_history_entry(
             iteration,
-            action_value,
+            prompt_action,
             &execution.result,
         ));
 
@@ -642,6 +642,7 @@ fn json_candidate(raw_response: &str) -> &str {
     let Some((_, rest)) = trimmed.split_once('\n') else {
         return trimmed;
     };
+    let rest = rest.trim();
     rest.strip_suffix("```").unwrap_or(rest).trim()
 }
 
@@ -798,7 +799,7 @@ impl RepoSandbox {
         let canonical_path = self
             .canonical_existing_path(&absolute_path)
             .await
-            .map_err(PathRejection::NotFound)?;
+            .map_err(path_rejection_for_canonical_error)?;
 
         let metadata = tokio::fs::metadata(&canonical_path)
             .await
@@ -823,7 +824,7 @@ impl RepoSandbox {
         let absolute_path = self.checkout_path.join(&relative_path);
         self.canonical_existing_path(&absolute_path)
             .await
-            .map_err(PathRejection::NotFound)?;
+            .map_err(path_rejection_for_canonical_error)?;
 
         Ok(SearchScope::Path(path_to_repo_string(&relative_path)))
     }
@@ -845,7 +846,7 @@ impl RepoSandbox {
         let canonical_parent = self
             .canonical_existing_path(parent)
             .await
-            .map_err(PathRejection::NotFound)?;
+            .map_err(path_rejection_for_canonical_error)?;
         if !canonical_parent.is_dir() {
             return Err(PathRejection::NotFound(format!(
                 "write target parent is not a directory: {}",
@@ -862,7 +863,7 @@ impl RepoSandbox {
             let canonical_target = self
                 .canonical_existing_path(&absolute_path)
                 .await
-                .map_err(PathRejection::NotFound)?;
+                .map_err(path_rejection_for_canonical_error)?;
             return Ok((relative_path, canonical_target));
         }
 
@@ -874,7 +875,7 @@ impl RepoSandbox {
             .await
             .map_err(|err| format!("path does not exist or cannot be accessed: {err}"))?;
         if !canonical_path.starts_with(&self.canonical_checkout_path) {
-            return Err("path escapes repository checkout".to_owned());
+            return Err(PATH_ESCAPES_REPOSITORY_CHECKOUT.to_owned());
         }
 
         Ok(canonical_path)
@@ -885,6 +886,14 @@ impl RepoSandbox {
 enum PathRejection {
     Unsafe(String),
     NotFound(String),
+}
+
+fn path_rejection_for_canonical_error(message: String) -> PathRejection {
+    if message == PATH_ESCAPES_REPOSITORY_CHECKOUT {
+        PathRejection::Unsafe(message)
+    } else {
+        PathRejection::NotFound(message)
+    }
 }
 
 #[derive(Debug)]
@@ -1062,6 +1071,50 @@ enum ChangeAction {
     },
 }
 
+impl ChangeAction {
+    fn for_prompt(&self) -> serde_json::Value {
+        match self {
+            Self::ReadFile { path } => serde_json::json!({
+                "action": "read_file",
+                "path": path,
+            }),
+            Self::Search { query, path } => serde_json::json!({
+                "action": "search",
+                "query": query,
+                "path": path,
+            }),
+            Self::WriteFile { path, content } => serde_json::json!({
+                "action": "write_file",
+                "path": path,
+                "content_bytes": content.len(),
+                "content_preview": truncate_text(content, MAX_HISTORY_ACTION_TEXT_CHARS),
+            }),
+            Self::EditFile {
+                path,
+                old_text,
+                new_text,
+            } => serde_json::json!({
+                "action": "edit_file",
+                "path": path,
+                "old_text_bytes": old_text.len(),
+                "old_text_preview": truncate_text(old_text, MAX_HISTORY_ACTION_TEXT_CHARS),
+                "new_text_bytes": new_text.len(),
+                "new_text_preview": truncate_text(new_text, MAX_HISTORY_ACTION_TEXT_CHARS),
+            }),
+            Self::Done {
+                status,
+                summary,
+                question,
+            } => serde_json::json!({
+                "action": "done",
+                "status": status,
+                "summary": summary,
+                "question": question,
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 enum DoneStatus {
@@ -1213,7 +1266,9 @@ struct PromptHistoryEntry {
 const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
 const MAX_SEARCH_RESULTS: usize = 40;
 const MAX_SEARCH_PREVIEW_CHARS: usize = 240;
+const MAX_HISTORY_ACTION_TEXT_CHARS: usize = 2_000;
 const MAX_HISTORY_VALUE_CHARS: usize = 48_000;
+const PATH_ESCAPES_REPOSITORY_CHECKOUT: &str = "path escapes repository checkout";
 
 #[cfg(test)]
 mod tests {
