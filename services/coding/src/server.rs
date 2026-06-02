@@ -80,7 +80,7 @@ async fn github_webhook(
     }
 
     match webhook::evaluate_event(&state.config, &event_name, &delivery_id, &body) {
-        Ok(WebhookDecision::Accepted(trigger)) => {
+        Ok(WebhookDecision::AcceptedIssue(trigger)) => {
             info!(
                 repo = %trigger.repo,
                 issue = trigger.issue_number,
@@ -93,6 +93,30 @@ async fn github_webhook(
             tokio::spawn(async move {
                 if let Err(err) = worker::run_issue_triggered(config, trigger).await {
                     error!(error = %err, "coding run failed");
+                }
+            });
+
+            json_response(
+                StatusCode::ACCEPTED,
+                WebhookResponse {
+                    status: "accepted",
+                    reason: None,
+                },
+            )
+        }
+        Ok(WebhookDecision::AcceptedPullRequestRevision(trigger)) => {
+            info!(
+                repo = %trigger.repo,
+                pull = trigger.pull_number,
+                trigger = %trigger.trigger,
+                run_id = %trigger.run_id,
+                "accepted pull request revision trigger"
+            );
+
+            let config = state.config.clone();
+            tokio::spawn(async move {
+                if let Err(err) = worker::run_pull_request_revision(config, trigger).await {
+                    error!(error = %err, "pull request revision run failed");
                 }
             });
 

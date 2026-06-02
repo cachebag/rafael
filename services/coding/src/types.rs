@@ -56,6 +56,9 @@ pub enum TriggerKind {
     Comment,
     Assignment,
     Manual,
+    PullRequestReview,
+    PullRequestComment,
+    PullRequestReviewComment,
 }
 
 impl fmt::Display for TriggerKind {
@@ -65,6 +68,9 @@ impl fmt::Display for TriggerKind {
             Self::Comment => write!(f, "comment"),
             Self::Assignment => write!(f, "assignment"),
             Self::Manual => write!(f, "manual"),
+            Self::PullRequestReview => write!(f, "pull_request_review"),
+            Self::PullRequestComment => write!(f, "pull_request_comment"),
+            Self::PullRequestReviewComment => write!(f, "pull_request_review_comment"),
         }
     }
 }
@@ -99,6 +105,18 @@ impl IssueTrigger {
             default_branch: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullRequestRevisionTrigger {
+    pub repo: RepoRef,
+    pub pull_number: u64,
+    pub trigger: TriggerKind,
+    pub actor: Option<String>,
+    pub installation_id: Option<u64>,
+    pub run_id: String,
+    pub default_branch: Option<String>,
+    pub head_branch: Option<String>,
 }
 
 pub fn new_run_id() -> String {

@@ -5,14 +5,15 @@ use sha2::Sha256;
 
 use crate::{
     config::AppConfig,
-    types::{IssueTrigger, RepoRef, TriggerKind},
+    types::{IssueTrigger, PullRequestRevisionTrigger, RepoRef, TriggerKind},
 };
 
 type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Clone)]
 pub enum WebhookDecision {
-    Accepted(IssueTrigger),
+    AcceptedIssue(IssueTrigger),
+    AcceptedPullRequestRevision(PullRequestRevisionTrigger),
     Ignored { reason: String },
 }
 
@@ -39,6 +40,10 @@ pub fn evaluate_event(
     match event_name {
         "issues" => evaluate_issues_event(config, delivery_id, body),
         "issue_comment" => evaluate_issue_comment_event(config, delivery_id, body),
+        "pull_request_review" => evaluate_pull_request_review_event(config, delivery_id, body),
+        "pull_request_review_comment" => {
+            evaluate_pull_request_review_comment_event(config, delivery_id, body)
+        }
         _ => Ok(WebhookDecision::Ignored {
             reason: format!("ignored unsupported event `{event_name}`"),
         }),
@@ -79,7 +84,7 @@ fn evaluate_issues_event(
                     .eq_ignore_ascii_case(&config.github.implementation_label)
             }) =>
         {
-            Ok(WebhookDecision::Accepted(IssueTrigger {
+            Ok(WebhookDecision::AcceptedIssue(IssueTrigger {
                 repo,
                 issue_number: event.issue.number,
                 trigger: TriggerKind::Label,
@@ -97,7 +102,7 @@ fn evaluate_issues_event(
                         .eq_ignore_ascii_case(&config.github.collaborator_login)
                 }) =>
         {
-            Ok(WebhookDecision::Accepted(IssueTrigger {
+            Ok(WebhookDecision::AcceptedIssue(IssueTrigger {
                 repo,
                 issue_number: event.issue.number,
                 trigger: TriggerKind::Assignment,
@@ -125,10 +130,6 @@ fn evaluate_issue_comment_event(
         return ignored(format!("ignored issue_comment action `{}`", event.action));
     }
 
-    if event.issue.pull_request.is_some() {
-        return ignored("ignored pull request comment event");
-    }
-
     if !config.github.is_allowed_repo(&full_name) {
         return ignored(format!("ignored repository `{full_name}`"));
     }
@@ -144,11 +145,30 @@ fn evaluate_issue_comment_event(
         ));
     }
 
+    if event.issue.pull_request.is_some() {
+        if !contains_revision_command(&event.comment.body, &config.github.command_mention) {
+            return ignored("ignored pull request comment without collaborator revision command");
+        }
+
+        return Ok(WebhookDecision::AcceptedPullRequestRevision(
+            PullRequestRevisionTrigger {
+                repo,
+                pull_number: event.issue.number,
+                trigger: TriggerKind::PullRequestComment,
+                actor: Some(event.sender.login),
+                installation_id: event.installation.map(|installation| installation.id),
+                run_id: delivery_id.to_owned(),
+                default_branch: Some(event.repository.default_branch),
+                head_branch: None,
+            },
+        ));
+    }
+
     if !contains_command(&event.comment.body, &config.github.command_mention) {
         return ignored("ignored comment without collaborator command");
     }
 
-    Ok(WebhookDecision::Accepted(IssueTrigger {
+    Ok(WebhookDecision::AcceptedIssue(IssueTrigger {
         repo,
         issue_number: event.issue.number,
         trigger: TriggerKind::Comment,
@@ -157,6 +177,119 @@ fn evaluate_issue_comment_event(
         run_id: delivery_id.to_owned(),
         default_branch: Some(event.repository.default_branch),
     }))
+}
+
+fn evaluate_pull_request_review_event(
+    config: &AppConfig,
+    delivery_id: &str,
+    body: &[u8],
+) -> anyhow::Result<WebhookDecision> {
+    let event: PullRequestReviewEvent =
+        serde_json::from_slice(body).context("failed to parse pull_request_review payload")?;
+    let repo = repo_ref(&event.repository);
+    let full_name = repo.full_name();
+
+    if event.action != "submitted" {
+        return ignored(format!(
+            "ignored pull_request_review action `{}`",
+            event.action
+        ));
+    }
+
+    if !config.github.is_allowed_repo(&full_name) {
+        return ignored(format!("ignored repository `{full_name}`"));
+    }
+
+    if !config.github.is_trusted_user(&event.sender.login) {
+        return ignored(format!(
+            "ignored untrusted review sender `{}`",
+            event.sender.login
+        ));
+    }
+
+    if !event.pull_request.state.eq_ignore_ascii_case("open") {
+        return ignored("ignored non-open pull request review event");
+    }
+
+    if !pull_request_head_is_same_repo(&event.pull_request, &full_name) {
+        return ignored("ignored pull request from a different head repository");
+    }
+
+    if event.review.state.eq_ignore_ascii_case("approved") {
+        return ignored("ignored approving pull request review");
+    }
+    if !matches!(
+        event.review.state.to_ascii_lowercase().as_str(),
+        "changes_requested" | "commented"
+    ) {
+        return ignored(format!(
+            "ignored pull_request_review state `{}`",
+            event.review.state
+        ));
+    }
+
+    Ok(WebhookDecision::AcceptedPullRequestRevision(
+        PullRequestRevisionTrigger {
+            repo,
+            pull_number: event.pull_request.number,
+            trigger: TriggerKind::PullRequestReview,
+            actor: Some(event.sender.login),
+            installation_id: event.installation.map(|installation| installation.id),
+            run_id: delivery_id.to_owned(),
+            default_branch: Some(event.repository.default_branch),
+            head_branch: Some(event.pull_request.head.ref_name),
+        },
+    ))
+}
+
+fn evaluate_pull_request_review_comment_event(
+    config: &AppConfig,
+    delivery_id: &str,
+    body: &[u8],
+) -> anyhow::Result<WebhookDecision> {
+    let event: PullRequestReviewCommentEvent = serde_json::from_slice(body)
+        .context("failed to parse pull_request_review_comment payload")?;
+    let repo = repo_ref(&event.repository);
+    let full_name = repo.full_name();
+
+    if event.action != "created" {
+        return ignored(format!(
+            "ignored pull_request_review_comment action `{}`",
+            event.action
+        ));
+    }
+
+    if !config.github.is_allowed_repo(&full_name) {
+        return ignored(format!("ignored repository `{full_name}`"));
+    }
+
+    if !config.github.is_trusted_user(&event.sender.login) {
+        return ignored(format!(
+            "ignored untrusted review comment sender `{}`",
+            event.sender.login
+        ));
+    }
+
+    if !event.pull_request.state.eq_ignore_ascii_case("open") {
+        return ignored("ignored non-open pull request review comment event");
+    }
+
+    if !pull_request_head_is_same_repo(&event.pull_request, &full_name) {
+        return ignored("ignored pull request from a different head repository");
+    }
+
+    Ok(WebhookDecision::AcceptedPullRequestRevision(
+        PullRequestRevisionTrigger {
+            repo,
+            pull_number: event.pull_request.number,
+            trigger: TriggerKind::PullRequestReviewComment,
+            actor: Some(event.sender.login),
+            installation_id: event.installation.map(|installation| installation.id),
+            run_id: delivery_id.to_owned(),
+            default_branch: Some(event.repository.default_branch),
+            head_branch: Some(event.pull_request.head.ref_name),
+        },
+    ))
 }
 
 fn contains_command(body: &str, mention: &str) -> bool {
@@ -174,10 +307,33 @@ fn contains_command(body: &str, mention: &str) -> bool {
     })
 }
 
+fn contains_revision_command(body: &str, mention: &str) -> bool {
+    let mention = mention.to_ascii_lowercase();
+
+    body.lines().any(|line| {
+        let lower = line.trim().to_ascii_lowercase();
+        if !lower.starts_with(&mention) {
+            return false;
+        }
+
+        let mut parts = lower.split_whitespace();
+        matches!(parts.next(), Some(value) if value == mention)
+            && matches!(parts.next(), Some("revise" | "retry"))
+    })
+}
+
 fn has_blocking_label(config: &AppConfig, labels: &[Label]) -> bool {
     labels
         .iter()
         .any(|label| config.github.is_blocking_label(&label.name))
+}
+
+fn pull_request_head_is_same_repo(pull_request: &PullRequestPayload, full_name: &str) -> bool {
+    pull_request
+        .head
+        .repo
+        .as_ref()
+        .is_some_and(|repo| repo.full_name.eq_ignore_ascii_case(full_name))
 }
 
 fn ignored(reason: impl Into<String>) -> anyhow::Result<WebhookDecision> {
@@ -215,6 +371,25 @@ struct IssueCommentEvent {
 }
 
 #[derive(Debug, Deserialize)]
+struct PullRequestReviewEvent {
+    action: String,
+    review: ReviewPayload,
+    pull_request: PullRequestPayload,
+    repository: RepositoryPayload,
+    installation: Option<InstallationPayload>,
+    sender: UserPayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestReviewCommentEvent {
+    action: String,
+    pull_request: PullRequestPayload,
+    repository: RepositoryPayload,
+    installation: Option<InstallationPayload>,
+    sender: UserPayload,
+}
+
+#[derive(Debug, Deserialize)]
 struct IssuePayload {
     number: u64,
     #[serde(default)]
@@ -226,6 +401,30 @@ struct IssuePayload {
 #[derive(Debug, Deserialize)]
 struct CommentPayload {
     body: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReviewPayload {
+    state: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestPayload {
+    number: u64,
+    state: String,
+    head: PullRequestHeadPayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestHeadPayload {
+    #[serde(rename = "ref")]
+    ref_name: String,
+    repo: Option<PullRequestRepoPayload>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestRepoPayload {
+    full_name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -340,10 +539,13 @@ mod tests {
 
         let decision = evaluate_event(&test_config(), "issues", "delivery-1", body).unwrap();
         match decision {
-            WebhookDecision::Accepted(trigger) => {
+            WebhookDecision::AcceptedIssue(trigger) => {
                 assert_eq!(trigger.issue_number, 7);
                 assert_eq!(trigger.trigger, TriggerKind::Label);
                 assert_eq!(trigger.installation_id, Some(42));
+            }
+            WebhookDecision::AcceptedPullRequestRevision(_) => {
+                panic!("unexpected pull request revision trigger")
             }
             WebhookDecision::Ignored { reason } => panic!("unexpected ignore: {reason}"),
         }
@@ -369,9 +571,12 @@ mod tests {
 
         let decision = evaluate_event(&test_config(), "issue_comment", "delivery-2", body).unwrap();
         match decision {
-            WebhookDecision::Accepted(trigger) => {
+            WebhookDecision::AcceptedIssue(trigger) => {
                 assert_eq!(trigger.issue_number, 8);
                 assert_eq!(trigger.trigger, TriggerKind::Comment);
+            }
+            WebhookDecision::AcceptedPullRequestRevision(_) => {
+                panic!("unexpected pull request revision trigger")
             }
             WebhookDecision::Ignored { reason } => panic!("unexpected ignore: {reason}"),
         }
@@ -397,9 +602,182 @@ mod tests {
 
         let decision = evaluate_event(&test_config(), "issue_comment", "delivery-2", body).unwrap();
         match decision {
-            WebhookDecision::Accepted(_) => panic!("unexpected accept"),
+            WebhookDecision::AcceptedIssue(_) | WebhookDecision::AcceptedPullRequestRevision(_) => {
+                panic!("unexpected accept")
+            }
             WebhookDecision::Ignored { reason } => {
                 assert!(reason.contains("untrusted command sender"));
+            }
+        }
+    }
+
+    #[test]
+    fn accepts_trusted_pull_request_changes_requested_review() {
+        let body = br#"{
+            "action": "submitted",
+            "review": {"state": "changes_requested"},
+            "pull_request": {
+                "number": 11,
+                "state": "open",
+                "head": {
+                    "ref": "work/issue-10-services-coding-operations-setup",
+                    "repo": {"full_name": "cachebag/rafael"}
+                }
+            },
+            "repository": {
+                "name": "rafael",
+                "default_branch": "master",
+                "owner": {"login":"cachebag"}
+            },
+            "installation": {"id": 42},
+            "sender": {"login":"cachebag"}
+        }"#;
+
+        let decision =
+            evaluate_event(&test_config(), "pull_request_review", "delivery-3", body).unwrap();
+        match decision {
+            WebhookDecision::AcceptedPullRequestRevision(trigger) => {
+                assert_eq!(trigger.pull_number, 11);
+                assert_eq!(trigger.trigger, TriggerKind::PullRequestReview);
+                assert_eq!(
+                    trigger.head_branch.as_deref(),
+                    Some("work/issue-10-services-coding-operations-setup")
+                );
+            }
+            WebhookDecision::AcceptedIssue(_) => panic!("unexpected issue trigger"),
+            WebhookDecision::Ignored { reason } => panic!("unexpected ignore: {reason}"),
+        }
+    }
+
+    #[test]
+    fn ignores_approving_pull_request_review() {
+        let body = br#"{
+            "action": "submitted",
+            "review": {"state": "approved"},
+            "pull_request": {
+                "number": 11,
+                "state": "open",
+                "head": {
+                    "ref": "work/issue-10-services-coding-operations-setup",
+                    "repo": {"full_name": "cachebag/rafael"}
+                }
+            },
+            "repository": {
+                "name": "rafael",
+                "default_branch": "master",
+                "owner": {"login":"cachebag"}
+            },
+            "installation": {"id": 42},
+            "sender": {"login":"cachebag"}
+        }"#;
+
+        let decision =
+            evaluate_event(&test_config(), "pull_request_review", "delivery-4", body).unwrap();
+        match decision {
+            WebhookDecision::AcceptedIssue(_) | WebhookDecision::AcceptedPullRequestRevision(_) => {
+                panic!("unexpected accept")
+            }
+            WebhookDecision::Ignored { reason } => {
+                assert!(reason.contains("approving"));
+            }
+        }
+    }
+
+    #[test]
+    fn accepts_trusted_pull_request_review_comment() {
+        let body = br#"{
+            "action": "created",
+            "pull_request": {
+                "number": 11,
+                "state": "open",
+                "head": {
+                    "ref": "work/issue-10-services-coding-operations-setup",
+                    "repo": {"full_name": "cachebag/rafael"}
+                }
+            },
+            "repository": {
+                "name": "rafael",
+                "default_branch": "master",
+                "owner": {"login":"cachebag"}
+            },
+            "installation": {"id": 42},
+            "sender": {"login":"cachebag"}
+        }"#;
+
+        let decision = evaluate_event(
+            &test_config(),
+            "pull_request_review_comment",
+            "delivery-5",
+            body,
+        )
+        .unwrap();
+        match decision {
+            WebhookDecision::AcceptedPullRequestRevision(trigger) => {
+                assert_eq!(trigger.pull_number, 11);
+                assert_eq!(trigger.trigger, TriggerKind::PullRequestReviewComment);
+            }
+            WebhookDecision::AcceptedIssue(_) => panic!("unexpected issue trigger"),
+            WebhookDecision::Ignored { reason } => panic!("unexpected ignore: {reason}"),
+        }
+    }
+
+    #[test]
+    fn accepts_trusted_pull_request_conversation_revision_command() {
+        let body = br#"{
+            "action": "created",
+            "issue": {
+                "number": 11,
+                "labels": [],
+                "pull_request": {"url": "https://api.github.test/repos/cachebag/rafael/pulls/11"}
+            },
+            "comment": {"body":"@netshared revise\n\nPlease fix the unit file."},
+            "repository": {
+                "name": "rafael",
+                "default_branch": "master",
+                "owner": {"login":"cachebag"}
+            },
+            "installation": {"id": 42},
+            "sender": {"login":"cachebag"}
+        }"#;
+
+        let decision = evaluate_event(&test_config(), "issue_comment", "delivery-6", body).unwrap();
+        match decision {
+            WebhookDecision::AcceptedPullRequestRevision(trigger) => {
+                assert_eq!(trigger.pull_number, 11);
+                assert_eq!(trigger.trigger, TriggerKind::PullRequestComment);
+                assert_eq!(trigger.head_branch, None);
+            }
+            WebhookDecision::AcceptedIssue(_) => panic!("unexpected issue trigger"),
+            WebhookDecision::Ignored { reason } => panic!("unexpected ignore: {reason}"),
+        }
+    }
+
+    #[test]
+    fn ignores_pull_request_conversation_comment_without_revision_command() {
+        let body = br#"{
+            "action": "created",
+            "issue": {
+                "number": 11,
+                "labels": [],
+                "pull_request": {"url": "https://api.github.test/repos/cachebag/rafael/pulls/11"}
+            },
+            "comment": {"body":"Looks close."},
+            "repository": {
+                "name": "rafael",
+                "default_branch": "master",
+                "owner": {"login":"cachebag"}
+            },
+            "installation": {"id": 42},
+            "sender": {"login":"cachebag"}
+        }"#;
+
+        let decision = evaluate_event(&test_config(), "issue_comment", "delivery-7", body).unwrap();
+        match decision {
+            WebhookDecision::AcceptedIssue(_) | WebhookDecision::AcceptedPullRequestRevision(_) => {
+                panic!("unexpected accept")
+            }
+            WebhookDecision::Ignored { reason } => {
+                assert!(reason.contains("revision command"));
             }
         }
     }
