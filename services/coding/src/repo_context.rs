@@ -667,6 +667,8 @@ mod tests {
                 max_file_read_bytes: 131_072,
                 max_write_bytes: 262_144,
                 max_changed_files: 12,
+                verification_command_timeout_seconds: 600,
+                verification_total_timeout_seconds: 1_200,
             },
             server: ServerConfig {
                 bind: "127.0.0.1:0".parse().unwrap(),
