@@ -8,7 +8,7 @@ This crate provides a personal AI coding collaborator. It includes functionality
 - **Configuration Validation**: Checks and logs the environment configuration.
 
 ## Usage
-To run the service, use the following commands:
+To run the service manually, use the following commands:
 
 ```bash
 # Run the GitHub App webhook receiver
@@ -21,29 +21,8 @@ cargo run -- issue-triggered --repo <repo-ref> --issue <issue-number> --trigger 
 cargo run -- check-config
 ```
 
-## Dependencies
-- `anyhow`: For error handling.
-- `axum`: For web framework.
-- `base64`: For base64 encoding/decoding.
-- `chrono`: For date and time handling.
-- `clap`: For command-line argument parsing.
-- `hex`: For hexadecimal encoding/decoding.
-- `hmac`: For HMAC message authentication.
-- `jsonwebtoken`: For JSON Web Token handling.
-- `reqwest`: For HTTP requests.
-- `serde`: For serialization/deserialization.
-- `sha2`: For SHA-2 hashing.
-- `tokio`: For asynchronous runtime.
-- `tracing`: For structured logging.
-- `tracing-subscriber`: For tracing subscriber.
 
 ## Setup
 Ensure that all dependencies are correctly installed and that the environment variables are set as required by the configuration.
 
-## Verification
-Run the following commands to verify the code:
 
-```bash
-cargo fmt --all -- --check
-cargo test --workspace --all-features
-```
