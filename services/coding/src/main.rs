@@ -1,3 +1,4 @@
+mod change_execution;
 mod config;
 mod github;
 mod model;
@@ -78,6 +79,11 @@ async fn main() -> anyhow::Result<()> {
                 bind = %config.server.bind,
                 max_run_minutes = config.workspace.max_run_minutes,
                 verify_commands_count = config.workspace.verify_commands.len(),
+                max_tool_iterations = config.workspace.max_tool_iterations,
+                max_tool_runtime_seconds = config.workspace.max_tool_runtime_seconds,
+                max_file_read_bytes = config.workspace.max_file_read_bytes,
+                max_write_bytes = config.workspace.max_write_bytes,
+                max_changed_files = config.workspace.max_changed_files,
                 "configuration loaded"
             );
             Ok(())

@@ -55,21 +55,44 @@ impl ModelClient {
             context_json
         );
 
+        self.chat(
+            "You are planning a scoped code change for an AI coding worker. Keep the plan concrete, conservative, and reviewable.",
+            &prompt,
+            0.2,
+        )
+        .await
+    }
+
+    pub async fn change_action(&self, prompt: &str) -> anyhow::Result<String> {
+        self.chat(
+            "You are implementing a scoped local code change through a constrained JSON tool loop. Return exactly one JSON object for the next action and no other text.",
+            prompt,
+            0.0,
+        )
+        .await
+    }
+
+    async fn chat(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+        temperature: f32,
+    ) -> anyhow::Result<String> {
         let response = self
             .http
             .post(format!("{}/chat/completions", self.base_url))
             .json(&ChatCompletionsRequest {
                 model: &self.model,
-                temperature: 0.2,
+                temperature,
                 stream: false,
                 messages: vec![
                     ChatMessage {
                         role: "system",
-                        content: "You are planning a scoped code change for an AI coding worker. Keep the plan concrete, conservative, and reviewable.",
+                        content: system_prompt,
                     },
                     ChatMessage {
                         role: "user",
-                        content: &prompt,
+                        content: user_prompt,
                     },
                 ],
             })
@@ -87,7 +110,7 @@ impl ModelClient {
             .into_iter()
             .next()
             .map(|choice| choice.message.content)
-            .unwrap_or_else(|| "No plan returned by the model.".to_owned()))
+            .unwrap_or_else(|| "No response returned by the model.".to_owned()))
     }
 }
 
