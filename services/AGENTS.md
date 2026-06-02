@@ -56,7 +56,7 @@ When changing service code, favor reliable behavior, clear state transitions, bo
 
 - Organize files top-down: the main service flow should appear first, and implementation details should appear after they are used.
 - Define type aliases, structs, enums, helper functions, helper methods, and private utilities after the code that uses them whenever practical.
-- Put constants at the bottom of the file, after types and functions.
+- Put constants after production code, but before any `#[cfg(test)]` test modules. If a file has no tests, constants should be at the bottom.
 - Keep modules focused around service responsibilities: config, server, webhook, worker, GitHub/model clients, and state helpers.
 - Split files when they become hard to scan or mix unrelated responsibilities.
 - Avoid premature shared abstractions across services. Extract to crates only after duplication or a stable boundary appears.
