@@ -28,6 +28,10 @@ enum Command {
     Serve,
     /// Run the phase-one worker for an already accepted issue trigger.
     IssueTriggered(IssueTriggeredArgs),
+    /// Show the latest local run state for an issue.
+    Status(IssueSelectionArgs),
+    /// Request cancellation for the active local run on an issue.
+    Cancel(IssueSelectionArgs),
     /// Validate environment configuration and exit.
     CheckConfig,
 }
@@ -46,6 +50,14 @@ struct IssueTriggeredArgs {
     installation_id: Option<u64>,
     #[arg(long)]
     run_id: Option<String>,
+}
+
+#[derive(Debug, Parser)]
+struct IssueSelectionArgs {
+    #[arg(long)]
+    repo: RepoRef,
+    #[arg(long)]
+    issue: u64,
 }
 
 #[tokio::main]
@@ -68,6 +80,20 @@ async fn main() -> anyhow::Result<()> {
             );
             worker::run_issue_triggered(config, trigger).await
         }
+        Command::Status(args) => {
+            let status = worker::issue_status(&config, &args.repo, args.issue).await?;
+            print_issue_status(&status);
+            Ok(())
+        }
+        Command::Cancel(args) => {
+            let result = worker::request_cancel(&config, &args.repo, args.issue).await?;
+            info!(
+                run_id = %result.active_run.run_id,
+                marker = %result.marker_path.display(),
+                "cancel requested"
+            );
+            Ok(())
+        }
         Command::CheckConfig => {
             info!(
                 repos = ?config.github.allowed_repos,
@@ -81,6 +107,31 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+fn print_issue_status(status: &worker::IssueStatus) {
+    let active_run_id = status.active_run.as_ref().map(|run| run.run_id.as_str());
+    let active_trigger = status
+        .active_run
+        .as_ref()
+        .map(|run| run.trigger.to_string());
+    let latest = status.latest_state.as_ref();
+
+    info!(
+        repo = %status.repo,
+        issue = status.issue_number,
+        issue_dir = %status.issue_dir.display(),
+        cancel_requested = status.cancel_requested,
+        active_run_id,
+        active_trigger,
+        latest_run_id = latest.map(|run| run.run_id.as_str()),
+        latest_status = latest.map(|run| run.status.to_string()),
+        branch = latest.and_then(|run| run.branch_name.as_deref()),
+        plan = latest.and_then(|run| run.plan_path.as_ref()).map(|path| path.display().to_string()),
+        error = latest.and_then(|run| run.error.as_deref()),
+        pr = latest.and_then(|run| run.pr_url.as_deref()),
+        "issue run status"
+    );
 }
 
 fn init_tracing() {

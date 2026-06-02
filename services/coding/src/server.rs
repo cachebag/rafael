@@ -81,28 +81,68 @@ async fn github_webhook(
 
     match webhook::evaluate_event(&state.config, &event_name, &delivery_id, &body) {
         Ok(WebhookDecision::Accepted(trigger)) => {
-            info!(
-                repo = %trigger.repo,
-                issue = trigger.issue_number,
-                trigger = %trigger.trigger,
-                run_id = %trigger.run_id,
-                "accepted webhook trigger"
-            );
+            let repo = trigger.repo.clone();
+            let issue_number = trigger.issue_number;
+            let trigger_kind = trigger.trigger;
+            let run_id = trigger.run_id.clone();
 
-            let config = state.config.clone();
-            tokio::spawn(async move {
-                if let Err(err) = worker::run_issue_triggered(config, trigger).await {
-                    error!(error = %err, "coding run failed");
+            match worker::claim_issue_run(&state.config, trigger, Some(body.as_ref())).await {
+                Ok(worker::RunClaimDecision::Claimed(claim)) => {
+                    info!(
+                        repo = %repo,
+                        issue = issue_number,
+                        trigger = %trigger_kind,
+                        run_id = %run_id,
+                        "accepted webhook trigger"
+                    );
+
+                    let config = state.config.clone();
+                    tokio::spawn(async move {
+                        if let Err(err) = worker::run_claimed_issue(config, claim).await {
+                            error!(error = %err, "coding run failed");
+                        }
+                    });
+
+                    json_response(
+                        StatusCode::ACCEPTED,
+                        WebhookResponse {
+                            status: "accepted",
+                            reason: None,
+                        },
+                    )
                 }
-            });
+                Ok(worker::RunClaimDecision::Duplicate { reason, active_run }) => {
+                    if let Some(active_run) = active_run {
+                        info!(
+                            repo = %active_run.repo,
+                            issue = active_run.issue_number,
+                            active_run_id = %active_run.run_id,
+                            %reason,
+                            "ignored duplicate webhook trigger"
+                        );
+                    } else {
+                        info!(repo = %repo, issue = issue_number, %reason, "ignored duplicate webhook trigger");
+                    }
 
-            json_response(
-                StatusCode::ACCEPTED,
-                WebhookResponse {
-                    status: "accepted",
-                    reason: None,
-                },
-            )
+                    json_response(
+                        StatusCode::OK,
+                        WebhookResponse {
+                            status: "ignored",
+                            reason: Some(reason),
+                        },
+                    )
+                }
+                Err(err) => {
+                    warn!(
+                        repo = %repo,
+                        issue = issue_number,
+                        run_id = %run_id,
+                        error = %err,
+                        "failed to claim webhook trigger"
+                    );
+                    response(StatusCode::INTERNAL_SERVER_ERROR, "failed to claim run")
+                }
+            }
         }
         Ok(WebhookDecision::Ignored { reason }) => {
             info!(%event_name, %delivery_id, %reason, "ignored webhook trigger");
