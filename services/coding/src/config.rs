@@ -47,7 +47,7 @@ pub struct ServerConfig {
 
 impl AppConfig {
     pub fn from_env() -> anyhow::Result<Self> {
-        let app_slug = env_or("RAFAEL_GITHUB_APP_SLUG", "jonah");
+        let app_slug = env_or("RAFAEL_GITHUB_APP_SLUG", "netshared");
         let workdir = PathBuf::from(env_or("RAFAEL_WORKDIR", "/var/lib/rafael/worktrees"));
 
         Ok(Self {
@@ -78,7 +78,7 @@ impl AppConfig {
                     &format!("{app_slug}[bot]"),
                 ),
                 allowed_repos: split_csv(&required_env("RAFAEL_ALLOWED_REPOS")?),
-                implementation_label: env_or("RAFAEL_IMPLEMENT_LABEL", "jonah:implement"),
+                implementation_label: env_or("RAFAEL_IMPLEMENT_LABEL", "netshared:implement"),
                 command_mention: env::var("RAFAEL_COMMAND_MENTION")
                     .unwrap_or_else(|_| format!("@{app_slug}")),
                 trusted_users: split_csv(&env_or("RAFAEL_TRUSTED_USERS", "")),

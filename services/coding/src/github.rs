@@ -74,7 +74,7 @@ impl GitHubClient {
             .post(url)
             .bearer_auth(jwt)
             .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
             .json(&CreateInstallationTokenRequest {
                 repositories: vec![repo.name.clone()],
                 permissions: InstallationTokenPermissions {
@@ -140,7 +140,7 @@ impl GitHubClient {
             .post(url)
             .bearer_auth(&token.token)
             .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
             .json(&CreateIssueCommentRequest { body })
             .send()
             .await
@@ -164,7 +164,7 @@ impl GitHubClient {
             .get(url)
             .bearer_auth(&token.token)
             .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
             .send()
             .await
             .with_context(|| format!("failed to fetch GitHub {resource_name}"))?
@@ -223,3 +223,5 @@ struct CreateInstallationTokenResponse {
 struct CreateIssueCommentRequest<'a> {
     body: &'a str,
 }
+
+const GITHUB_API_VERSION: &str = "2026-03-10";
