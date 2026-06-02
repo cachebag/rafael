@@ -15,14 +15,17 @@ use crate::{
         ChangeExecutionOutcome, ChangeExecutionRequest, ChangeExecutionStatus, execute_change_loop,
     },
     config::AppConfig,
-    github::{GitHubClient, InstallationToken, IssueInfo, RepositoryInfo},
+    github::{
+        GitHubClient, InstallationToken, IssueComment, IssueInfo, PullRequestDetails,
+        PullRequestReview, PullRequestReviewComment, RepositoryInfo,
+    },
     model::ModelClient,
     publish::{
-        PublishCommitRequest, PublishPullRequestRequest, prepare_publish_commit,
-        publish_pull_request,
+        ExistingPullRequest, PublishCommitRequest, PublishPullRequestRequest,
+        prepare_publish_commit, publish_pull_request,
     },
     repo_context::{RepoContext, collect_repository_context},
-    types::{IssueTrigger, RepoRef, TriggerKind},
+    types::{IssueTrigger, PullRequestRevisionTrigger, RepoRef, TriggerKind},
     verification::{
         VerificationCommandResult, VerificationOutcome, VerificationRequest, VerificationStatus,
         run_verification,
@@ -270,6 +273,248 @@ async fn run_issue_triggered_inner(config: AppConfig, trigger: IssueTrigger) -> 
         run_dir: &run_dir,
         issue_number: trigger.issue_number,
         run_id: &trigger.run_id,
+        existing_pull_request: None,
+    };
+
+    if !handle_change_execution_outcome(&mut state, &run_context, &outcome).await? {
+        return Ok(());
+    }
+
+    run_verification_phase(&mut state, &run_context).await?;
+    run_publish_phase(&mut state, &run_context).await
+}
+
+pub async fn run_pull_request_revision(
+    config: AppConfig,
+    trigger: PullRequestRevisionTrigger,
+) -> anyhow::Result<()> {
+    let max_run = Duration::from_secs(config.workspace.max_run_minutes * 60);
+    timeout(max_run, run_pull_request_revision_inner(config, trigger))
+        .await
+        .context("pull request revision run exceeded configured time limit")?
+}
+
+async fn run_pull_request_revision_inner(
+    config: AppConfig,
+    trigger: PullRequestRevisionTrigger,
+) -> anyhow::Result<()> {
+    let installation_id = trigger
+        .installation_id
+        .or(config.github.installation_id)
+        .context("installation id must come from webhook payload or config")?;
+    let created_at = now_rfc3339();
+    let run_dir = pull_request_run_dir(&config, &trigger);
+
+    tokio::fs::create_dir_all(&run_dir)
+        .await
+        .with_context(|| format!("failed to create {}", run_dir.display()))?;
+
+    let mut state = RunState {
+        run_id: trigger.run_id.clone(),
+        repo: trigger.repo.clone(),
+        issue_number: trigger.pull_number,
+        trigger: trigger.trigger,
+        actor: trigger.actor.clone(),
+        installation_id,
+        status: RunStatus::Received,
+        issue_title: None,
+        issue_url: None,
+        default_branch: trigger.default_branch.clone(),
+        branch_name: trigger.head_branch.clone(),
+        worktree_path: None,
+        context_path: None,
+        plan_path: None,
+        transcript_path: None,
+        diff_stat_path: None,
+        changed_files: Vec::new(),
+        implementation_summary: None,
+        verification_path: None,
+        verification_status: None,
+        verification_summary: None,
+        verification_results: Vec::new(),
+        repair_attempted: false,
+        repair_summary: None,
+        commit_sha: None,
+        pr_url: None,
+        pr_number: Some(trigger.pull_number),
+        publish_summary: None,
+        error: None,
+        created_at: created_at.clone(),
+        updated_at: created_at,
+    };
+    write_state(&run_dir, &state).await?;
+
+    let github = GitHubClient::new(&config.github)?;
+    let model = ModelClient::new(&config.model)?;
+
+    let token = github
+        .create_installation_token(&config.github, installation_id, &trigger.repo)
+        .await?;
+    info!(
+        expires_at = %token.expires_at,
+        run_id = %trigger.run_id,
+        "received GitHub App installation token"
+    );
+    state.status = RunStatus::Authenticated;
+    state.updated_at = now_rfc3339();
+    write_state(&run_dir, &state).await?;
+
+    let repo = github.repository(&token, &trigger.repo).await?;
+    let pull_request = github
+        .pull_request(&token, &trigger.repo, trigger.pull_number)
+        .await?;
+
+    if !pull_request.state.eq_ignore_ascii_case("open") {
+        bail!("pull request #{} is not open", pull_request.number);
+    }
+
+    let head_repo = pull_request
+        .head
+        .repo
+        .as_ref()
+        .context("pull request head repository is unavailable")?;
+    if !head_repo
+        .full_name
+        .eq_ignore_ascii_case(&trigger.repo.full_name())
+    {
+        bail!(
+            "refusing to revise pull request #{} from head repository `{}`",
+            pull_request.number,
+            head_repo.full_name
+        );
+    }
+
+    let issue = github
+        .issue(&token, &trigger.repo, trigger.pull_number)
+        .await?;
+    let issue_comments = github
+        .issue_comments(&token, &trigger.repo, trigger.pull_number)
+        .await?;
+    let feedback = collect_pull_request_feedback(
+        &config,
+        &github,
+        &token,
+        &trigger.repo,
+        trigger.pull_number,
+        issue_comments.clone(),
+    )
+    .await?;
+    let feedback_path = run_dir.join("review-feedback.json");
+    let feedback_body =
+        serde_json::to_vec_pretty(&feedback).context("failed to serialize PR feedback")?;
+    tokio::fs::write(&feedback_path, feedback_body)
+        .await
+        .with_context(|| format!("failed to write {}", feedback_path.display()))?;
+
+    post_comment_best_effort(
+        &github,
+        &token,
+        &trigger.repo,
+        trigger.pull_number,
+        &format!(
+            "Started a pull request revision run.\n\nRun: `{}`\nTrigger: `{}`",
+            trigger.run_id, trigger.trigger
+        ),
+    )
+    .await;
+
+    let branch_name = pull_request.head.ref_name.clone();
+    let worktree_path = prepare_pull_request_worktree(
+        &config,
+        &token,
+        &trigger.repo,
+        trigger.pull_number,
+        &trigger.run_id,
+        &branch_name,
+    )
+    .await?;
+
+    state.status = RunStatus::Prepared;
+    state.issue_title = Some(issue.title.clone());
+    state.issue_url = Some(issue.html_url.clone());
+    state.default_branch = Some(repo.default_branch.clone());
+    state.branch_name = Some(branch_name.clone());
+    state.worktree_path = Some(worktree_path.clone());
+    state.pr_url = Some(pull_request.html_url.clone());
+    state.updated_at = now_rfc3339();
+    write_state(&run_dir, &state).await?;
+
+    let repo_context =
+        collect_repository_context(&config, &repo, &issue, &issue_comments, &worktree_path).await?;
+    let context_path = run_dir.join("context.json");
+    let context_body =
+        serde_json::to_vec_pretty(&repo_context).context("failed to serialize repo context")?;
+    tokio::fs::write(&context_path, context_body)
+        .await
+        .with_context(|| format!("failed to write {}", context_path.display()))?;
+    state.context_path = Some(context_path);
+    state.updated_at = now_rfc3339();
+    write_state(&run_dir, &state).await?;
+
+    let plan = pull_request_revision_plan(&pull_request, &feedback);
+    let plan_path = run_dir.join("plan.md");
+    tokio::fs::write(&plan_path, &plan)
+        .await
+        .with_context(|| format!("failed to write {}", plan_path.display()))?;
+
+    state.status = RunStatus::Planned;
+    state.plan_path = Some(plan_path);
+    state.updated_at = now_rfc3339();
+    write_state(&run_dir, &state).await?;
+
+    state.status = RunStatus::Implementing;
+    state.transcript_path = Some(run_dir.join("transcript.jsonl"));
+    state.updated_at = now_rfc3339();
+    write_state(&run_dir, &state).await?;
+
+    let outcome = match execute_change_loop(ChangeExecutionRequest {
+        config: &config,
+        model: &model,
+        repo: &repo,
+        issue: &issue,
+        branch_name: &branch_name,
+        repo_context: &repo_context,
+        plan: &plan,
+        checkout_path: &worktree_path,
+        run_dir: &run_dir,
+    })
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            state.status = RunStatus::Failed;
+            state.error = Some(format!("change execution failed: {err}"));
+            state.updated_at = now_rfc3339();
+            write_state(&run_dir, &state).await?;
+            return Err(err).context("change execution failed");
+        }
+    };
+
+    state.transcript_path = Some(outcome.transcript_path.clone());
+    state.diff_stat_path = outcome.diff_stat_path.clone();
+    state.changed_files = outcome.changed_files.clone();
+    state.implementation_summary = Some(outcome.summary.clone());
+    state.updated_at = now_rfc3339();
+
+    let run_context = WorkerRunContext {
+        config: &config,
+        github: &github,
+        model: &model,
+        token: &token,
+        repo_ref: &trigger.repo,
+        repo: &repo,
+        issue: &issue,
+        branch_name: &branch_name,
+        repo_context: &repo_context,
+        plan: &plan,
+        worktree_path: &worktree_path,
+        run_dir: &run_dir,
+        issue_number: trigger.pull_number,
+        run_id: &trigger.run_id,
+        existing_pull_request: Some(ExistingPullRequestTarget {
+            number: pull_request.number,
+            html_url: pull_request.html_url.clone(),
+        }),
     };
 
     if !handle_change_execution_outcome(&mut state, &run_context, &outcome).await? {
@@ -405,6 +650,12 @@ async fn run_publish_phase(
         commit_sha: &commit.commit_sha,
         implementation_summary: state.implementation_summary.as_deref(),
         run_id: context.run_id,
+        existing_pull_request: context.existing_pull_request.as_ref().map(|pull| {
+            ExistingPullRequest {
+                number: pull.number,
+                html_url: pull.html_url.as_str(),
+            }
+        }),
     })
     .await
     {
@@ -628,6 +879,19 @@ struct WorkerRunContext<'a> {
     run_dir: &'a Path,
     issue_number: u64,
     run_id: &'a str,
+    existing_pull_request: Option<ExistingPullRequestTarget>,
+}
+
+struct ExistingPullRequestTarget {
+    number: u64,
+    html_url: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PullRequestFeedback {
+    reviews: Vec<PullRequestReview>,
+    review_comments: Vec<PullRequestReviewComment>,
+    conversation_comments: Vec<IssueComment>,
 }
 
 fn publish_completed_comment(pr_url: &str, commit_sha: &str, created: bool) -> String {
@@ -725,12 +989,144 @@ async fn post_comment_best_effort(
     }
 }
 
+async fn collect_pull_request_feedback(
+    config: &AppConfig,
+    github: &GitHubClient,
+    token: &InstallationToken,
+    repo: &RepoRef,
+    pull_number: u64,
+    issue_comments: Vec<IssueComment>,
+) -> anyhow::Result<PullRequestFeedback> {
+    let reviews = github
+        .pull_request_reviews(token, repo, pull_number)
+        .await?;
+    let review_comments = github
+        .pull_request_review_comments(token, repo, pull_number)
+        .await?;
+
+    Ok(PullRequestFeedback {
+        reviews: reviews
+            .into_iter()
+            .rev()
+            .filter(|review| config.github.is_trusted_user(&review.user.login))
+            .filter(|review| !review.state.eq_ignore_ascii_case("approved"))
+            .filter(|review| {
+                review
+                    .body
+                    .as_deref()
+                    .is_some_and(|body| !body.trim().is_empty())
+                    || review.state.eq_ignore_ascii_case("changes_requested")
+            })
+            .take(MAX_FEEDBACK_ITEMS)
+            .collect(),
+        review_comments: review_comments
+            .into_iter()
+            .rev()
+            .filter(|comment| config.github.is_trusted_user(&comment.user.login))
+            .filter(|comment| !comment.body.trim().is_empty())
+            .take(MAX_FEEDBACK_ITEMS)
+            .collect(),
+        conversation_comments: issue_comments
+            .into_iter()
+            .rev()
+            .filter(|comment| config.github.is_trusted_user(&comment.user.login))
+            .filter(|comment| !comment.body.trim().is_empty())
+            .take(MAX_FEEDBACK_ITEMS)
+            .collect(),
+    })
+}
+
+fn pull_request_revision_plan(
+    pull_request: &PullRequestDetails,
+    feedback: &PullRequestFeedback,
+) -> String {
+    format!(
+        "Revise existing pull request #{} on branch `{}`.\n\nDo not create a new branch or a new pull request. Address the trusted PR review feedback below, keep the change scoped, and update the existing branch. If the feedback is missing, ambiguous, or conflicts with repository safety, return done with status blocked and ask a concrete question.\n\nPull request title:\n{}\n\nPull request body:\n{}\n\nTrusted review feedback:\n{}",
+        pull_request.number,
+        pull_request.head.ref_name,
+        pull_request.title,
+        truncate_feedback_text(
+            pull_request
+                .body
+                .as_deref()
+                .unwrap_or("(no pull request body)")
+        ),
+        feedback_for_plan(feedback)
+    )
+}
+
+fn feedback_for_plan(feedback: &PullRequestFeedback) -> String {
+    let mut lines = Vec::new();
+
+    for review in &feedback.reviews {
+        let body = review
+            .body
+            .as_deref()
+            .map(truncate_feedback_text)
+            .filter(|body| !body.trim().is_empty())
+            .unwrap_or_else(|| "(no review body)".to_owned());
+        lines.push(format!(
+            "- Review by `{}` with state `{}`: {}",
+            review.user.login, review.state, body
+        ));
+    }
+
+    for comment in &feedback.review_comments {
+        let line = comment
+            .line
+            .or(comment.original_line)
+            .map(|line| format!(":{line}"))
+            .unwrap_or_default();
+        lines.push(format!(
+            "- Inline comment by `{}` on `{}`{}: {}",
+            comment.user.login,
+            comment.path,
+            line,
+            truncate_feedback_text(&comment.body)
+        ));
+    }
+
+    for comment in &feedback.conversation_comments {
+        lines.push(format!(
+            "- PR conversation comment by `{}`: {}",
+            comment.user.login,
+            truncate_feedback_text(&comment.body)
+        ));
+    }
+
+    if lines.is_empty() {
+        "(no trusted PR review feedback found)".to_owned()
+    } else {
+        lines.join("\n")
+    }
+}
+
+fn truncate_feedback_text(value: &str) -> String {
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.chars().count() <= MAX_FEEDBACK_CHARS {
+        compact
+    } else {
+        let mut truncated = compact.chars().take(MAX_FEEDBACK_CHARS).collect::<String>();
+        truncated.push_str("...");
+        truncated
+    }
+}
+
 fn run_dir(config: &AppConfig, trigger: &IssueTrigger) -> PathBuf {
     config
         .workspace
         .runs_dir
         .join(trigger.repo.safe_dir_name())
         .join(format!("issue-{}", trigger.issue_number))
+        .join(safe_path_component(&trigger.run_id))
+}
+
+fn pull_request_run_dir(config: &AppConfig, trigger: &PullRequestRevisionTrigger) -> PathBuf {
+    config
+        .workspace
+        .runs_dir
+        .join(trigger.repo.safe_dir_name())
+        .join(format!("pr-{}", trigger.pull_number))
         .join(safe_path_component(&trigger.run_id))
 }
 
@@ -794,6 +1190,59 @@ async fn prepare_worktree(
     Ok(repo_dir)
 }
 
+async fn prepare_pull_request_worktree(
+    config: &AppConfig,
+    token: &InstallationToken,
+    repo: &RepoRef,
+    pull_number: u64,
+    run_id: &str,
+    branch_name: &str,
+) -> anyhow::Result<PathBuf> {
+    if !is_safe_branch_name(branch_name) {
+        bail!("refusing to check out unsafe pull request branch `{branch_name}`");
+    }
+
+    let repo_dir = pull_request_checkout_path(config, repo, pull_number, run_id);
+    let parent = repo_dir
+        .parent()
+        .context("pull request checkout path must have a parent directory")?;
+    tokio::fs::create_dir_all(parent)
+        .await
+        .with_context(|| format!("failed to create {}", parent.display()))?;
+
+    if !repo_dir.starts_with(&config.workspace.workdir) {
+        bail!("computed pull request workdir escaped configured workdir");
+    }
+
+    if !repo_dir.join(".git").exists() {
+        run_git_clone(&config.workspace.workdir, token, repo, &repo_dir).await?;
+    }
+
+    run_git(
+        &repo_dir,
+        token,
+        vec![
+            "fetch".to_owned(),
+            "origin".to_owned(),
+            format!("+refs/heads/{branch_name}:refs/remotes/origin/{branch_name}"),
+        ],
+    )
+    .await?;
+    run_git(
+        &repo_dir,
+        token,
+        vec![
+            "switch".to_owned(),
+            "-C".to_owned(),
+            branch_name.to_owned(),
+            format!("origin/{branch_name}"),
+        ],
+    )
+    .await?;
+
+    Ok(repo_dir)
+}
+
 fn isolated_checkout_path(
     config: &AppConfig,
     repo: &RepoRef,
@@ -805,6 +1254,21 @@ fn isolated_checkout_path(
         .workdir
         .join(repo.safe_dir_name())
         .join(format!("issue-{issue_number}"))
+        .join(safe_path_component(run_id))
+        .join("checkout")
+}
+
+fn pull_request_checkout_path(
+    config: &AppConfig,
+    repo: &RepoRef,
+    pull_number: u64,
+    run_id: &str,
+) -> PathBuf {
+    config
+        .workspace
+        .workdir
+        .join(repo.safe_dir_name())
+        .join(format!("pr-{pull_number}"))
         .join(safe_path_component(run_id))
         .join("checkout")
 }
@@ -957,6 +1421,22 @@ fn safe_path_component(value: &str) -> String {
         safe.to_owned()
     }
 }
+
+fn is_safe_branch_name(branch_name: &str) -> bool {
+    !branch_name.is_empty()
+        && !branch_name.starts_with('-')
+        && !branch_name.contains("..")
+        && !branch_name.contains('\\')
+        && !branch_name.contains(' ')
+        && !branch_name.contains('\n')
+        && !branch_name.contains('\r')
+        && !branch_name.contains('\0')
+        && !branch_name.ends_with('/')
+        && !branch_name.ends_with(".lock")
+}
+
+const MAX_FEEDBACK_ITEMS: usize = 30;
+const MAX_FEEDBACK_CHARS: usize = 2_000;
 
 #[cfg(test)]
 mod tests {

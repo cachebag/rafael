@@ -70,12 +70,38 @@ pub struct PublishPullRequestRequest<'a> {
     pub commit_sha: &'a str,
     pub implementation_summary: Option<&'a str>,
     pub run_id: &'a str,
+    pub existing_pull_request: Option<ExistingPullRequest<'a>>,
+}
+
+pub struct ExistingPullRequest<'a> {
+    pub number: u64,
+    pub html_url: &'a str,
 }
 
 pub async fn publish_pull_request(
     request: PublishPullRequestRequest<'_>,
 ) -> anyhow::Result<PublishPullRequestOutcome> {
     push_branch(request.checkout_path, request.token, request.branch_name).await?;
+
+    if let Some(existing) = request.existing_pull_request {
+        request
+            .github
+            .post_issue_comment(
+                request.token,
+                request.repo_ref,
+                existing.number,
+                &format!(
+                    "Updated this pull request from run `{}` at commit `{}`.",
+                    request.run_id, request.commit_sha
+                ),
+            )
+            .await?;
+        return Ok(PublishPullRequestOutcome {
+            pr_number: existing.number,
+            pr_url: existing.html_url.to_owned(),
+            created: false,
+        });
+    }
 
     let title = pull_request_title(request.issue);
     let body = pull_request_body(request.issue, request.implementation_summary);

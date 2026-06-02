@@ -67,6 +67,57 @@ pub struct PullRequestInfo {
     pub state: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PullRequestDetails {
+    pub number: u64,
+    pub html_url: String,
+    pub title: String,
+    pub state: String,
+    pub body: Option<String>,
+    pub head: PullRequestHead,
+    pub base: PullRequestBase,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PullRequestHead {
+    #[serde(rename = "ref")]
+    pub ref_name: String,
+    pub sha: String,
+    pub repo: Option<PullRequestRepository>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PullRequestBase {
+    #[serde(rename = "ref")]
+    pub ref_name: String,
+    pub repo: PullRequestRepository,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PullRequestRepository {
+    pub full_name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PullRequestReview {
+    pub id: u64,
+    pub state: String,
+    pub body: Option<String>,
+    pub submitted_at: Option<String>,
+    pub user: IssueCommentUser,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PullRequestReviewComment {
+    pub id: u64,
+    pub body: String,
+    pub path: String,
+    pub line: Option<u64>,
+    pub original_line: Option<u64>,
+    pub created_at: String,
+    pub user: IssueCommentUser,
+}
+
 impl GitHubClient {
     pub fn new(config: &GitHubConfig) -> anyhow::Result<Self> {
         Ok(Self {
@@ -156,6 +207,43 @@ impl GitHubClient {
             self.api_base_url
         );
         self.get_json(token, url, "issue comments").await
+    }
+
+    pub async fn pull_request(
+        &self,
+        token: &InstallationToken,
+        repo: &RepoRef,
+        pull_number: u64,
+    ) -> anyhow::Result<PullRequestDetails> {
+        let url = format!("{}/repos/{repo}/pulls/{pull_number}", self.api_base_url);
+        self.get_json(token, url, "pull request").await
+    }
+
+    pub async fn pull_request_reviews(
+        &self,
+        token: &InstallationToken,
+        repo: &RepoRef,
+        pull_number: u64,
+    ) -> anyhow::Result<Vec<PullRequestReview>> {
+        let url = format!(
+            "{}/repos/{repo}/pulls/{pull_number}/reviews?per_page=30",
+            self.api_base_url
+        );
+        self.get_json(token, url, "pull request reviews").await
+    }
+
+    pub async fn pull_request_review_comments(
+        &self,
+        token: &InstallationToken,
+        repo: &RepoRef,
+        pull_number: u64,
+    ) -> anyhow::Result<Vec<PullRequestReviewComment>> {
+        let url = format!(
+            "{}/repos/{repo}/pulls/{pull_number}/comments?per_page=30",
+            self.api_base_url
+        );
+        self.get_json(token, url, "pull request review comments")
+            .await
     }
 
     pub async fn open_pull_request_for_branch(
