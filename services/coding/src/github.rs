@@ -256,6 +256,56 @@ impl GitHubClient {
             .await
     }
 
+    pub async fn unresolved_pull_request_review_comments(
+        &self,
+        token: &InstallationToken,
+        repo: &RepoRef,
+        pull_number: u64,
+    ) -> anyhow::Result<Vec<PullRequestReviewComment>> {
+        let response = self
+            .post_graphql::<PullRequestReviewThreadsQueryData, _>(
+                token,
+                PULL_REQUEST_REVIEW_THREADS_QUERY,
+                PullRequestReviewThreadsVariables {
+                    owner: &repo.owner,
+                    name: &repo.name,
+                    number: pull_number,
+                },
+                "pull request review threads",
+            )
+            .await?;
+        let pull_request = response
+            .repository
+            .pull_request
+            .context("GitHub GraphQL response did not include pull request")?;
+
+        let mut comments = Vec::new();
+        for thread in pull_request.review_threads.nodes {
+            if thread.is_resolved {
+                continue;
+            }
+
+            for comment in thread.comments.nodes {
+                let Some(author) = comment.author else {
+                    continue;
+                };
+                comments.push(PullRequestReviewComment {
+                    id: comment.database_id.unwrap_or_default(),
+                    body: comment.body,
+                    path: thread.path.clone(),
+                    line: thread.line,
+                    original_line: thread.original_line,
+                    created_at: comment.created_at,
+                    user: IssueCommentUser {
+                        login: author.login,
+                    },
+                });
+            }
+        }
+
+        Ok(comments)
+    }
+
     pub async fn pull_request_files(
         &self,
         token: &InstallationToken,
@@ -406,6 +456,47 @@ impl GitHubClient {
             .await
             .with_context(|| format!("failed to parse GitHub {resource_name} response"))
     }
+
+    async fn post_graphql<T, V>(
+        &self,
+        token: &InstallationToken,
+        query: &str,
+        variables: V,
+        resource_name: &str,
+    ) -> anyhow::Result<T>
+    where
+        T: for<'de> Deserialize<'de>,
+        V: Serialize,
+    {
+        let response = self
+            .http
+            .post(format!("{}/graphql", self.api_base_url))
+            .bearer_auth(&token.token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+            .json(&GraphqlRequest { query, variables })
+            .send()
+            .await
+            .with_context(|| format!("failed to fetch GitHub {resource_name}"))?
+            .error_for_status()
+            .with_context(|| format!("GitHub {resource_name} request failed"))?
+            .json::<GraphqlResponse<T>>()
+            .await
+            .with_context(|| format!("failed to parse GitHub {resource_name} response"))?;
+
+        if let Some(errors) = response.errors.filter(|errors| !errors.is_empty()) {
+            let summary = errors
+                .into_iter()
+                .map(|error| error.message)
+                .collect::<Vec<_>>()
+                .join("; ");
+            bail!("GitHub {resource_name} GraphQL request failed: {summary}");
+        }
+
+        response
+            .data
+            .context("GitHub GraphQL response did not include data")
+    }
 }
 
 fn create_app_jwt(app_id: u64, private_key_path: &Path) -> anyhow::Result<String> {
@@ -483,5 +574,109 @@ struct UpdatePullRequestRequest<'a> {
 struct CreateIssueCommentRequest<'a> {
     body: &'a str,
 }
+
+#[derive(Debug, Serialize)]
+struct GraphqlRequest<'a, V> {
+    query: &'a str,
+    variables: V,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphqlResponse<T> {
+    data: Option<T>,
+    errors: Option<Vec<GraphqlError>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphqlError {
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PullRequestReviewThreadsVariables<'a> {
+    owner: &'a str,
+    name: &'a str,
+    number: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestReviewThreadsQueryData {
+    repository: PullRequestReviewThreadsRepository,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestReviewThreadsRepository {
+    #[serde(rename = "pullRequest")]
+    pull_request: Option<PullRequestReviewThreadsPullRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestReviewThreadsPullRequest {
+    #[serde(rename = "reviewThreads")]
+    review_threads: PullRequestReviewThreadConnection,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestReviewThreadConnection {
+    nodes: Vec<PullRequestReviewThreadNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestReviewThreadNode {
+    #[serde(rename = "isResolved")]
+    is_resolved: bool,
+    path: String,
+    line: Option<u64>,
+    #[serde(rename = "originalLine")]
+    original_line: Option<u64>,
+    comments: PullRequestReviewThreadCommentConnection,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestReviewThreadCommentConnection {
+    nodes: Vec<PullRequestReviewThreadCommentNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestReviewThreadCommentNode {
+    #[serde(rename = "databaseId")]
+    database_id: Option<u64>,
+    body: String,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    author: Option<PullRequestReviewThreadAuthor>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestReviewThreadAuthor {
+    login: String,
+}
+
+const PULL_REQUEST_REVIEW_THREADS_QUERY: &str = r#"
+query PullRequestReviewThreads($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 50) {
+        nodes {
+          isResolved
+          path
+          line
+          originalLine
+          comments(first: 20) {
+            nodes {
+              databaseId
+              body
+              createdAt
+              author {
+                login
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"#;
 
 const GITHUB_API_VERSION: &str = "2026-03-10";

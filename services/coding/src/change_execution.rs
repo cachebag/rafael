@@ -139,6 +139,19 @@ pub async fn execute_change_loop(
         let prompt_action = action.for_prompt();
         let repeat_count = consecutive_action_repetitions(&history, &prompt_action);
         if repeat_count >= MAX_CONSECUTIVE_IDENTICAL_ACTIONS {
+            if should_finish_after_repeated_write_edit(&history, &action, &prompt_action) {
+                return finish_outcome(
+                    ChangeExecutionStatus::Completed,
+                    "applied current changes, then stopped because the model repeated an already-applied edit".to_owned(),
+                    None,
+                    iteration,
+                    &transcript_path,
+                    &diff_stat_path,
+                    &sandbox,
+                )
+                .await;
+            }
+
             return finish_outcome(
                 ChangeExecutionStatus::Blocked,
                 "model repeated the same action without making progress".to_owned(),
@@ -320,7 +333,14 @@ async fn action_file_content_for_prompt(
     sandbox: &RepoSandbox,
     limits: &ExecutionLimits,
 ) -> Option<(String, u64)> {
-    let path = action.target_path()?;
+    file_content_for_prompt(action.target_path()?, sandbox, limits).await
+}
+
+async fn file_content_for_prompt(
+    path: &str,
+    sandbox: &RepoSandbox,
+    limits: &ExecutionLimits,
+) -> Option<(String, u64)> {
     let absolute_path = sandbox.existing_file(path).await.ok()?;
     let metadata = tokio::fs::metadata(&absolute_path).await.ok()?;
     if metadata.len() > limits.max_read_bytes {
@@ -501,7 +521,14 @@ async fn write_file_action(
         .await
         .with_context(|| format!("failed to write {}", absolute_path.display()))?;
 
-    write_result_after_change(format!("wrote {path}"), sandbox, diff_stat_path).await
+    write_result_after_change(
+        format!("wrote {path}"),
+        path,
+        sandbox,
+        diff_stat_path,
+        limits,
+    )
+    .await
 }
 
 async fn edit_file_action(
@@ -587,7 +614,14 @@ async fn edit_file_action(
         .await
         .with_context(|| format!("failed to write {}", absolute_path.display()))?;
 
-    write_result_after_change(format!("edited {path}"), sandbox, diff_stat_path).await
+    write_result_after_change(
+        format!("edited {path}"),
+        path,
+        sandbox,
+        diff_stat_path,
+        limits,
+    )
+    .await
 }
 
 async fn changed_file_cap_error(
@@ -609,20 +643,28 @@ async fn changed_file_cap_error(
 
 async fn write_result_after_change(
     message: String,
+    changed_path: &str,
     sandbox: &RepoSandbox,
     diff_stat_path: &Path,
+    limits: &ExecutionLimits,
 ) -> anyhow::Result<ActionExecution> {
     let diff_stat = git_diff_stat(&sandbox.checkout_path).await?;
     tokio::fs::write(diff_stat_path, &diff_stat)
         .await
         .with_context(|| format!("failed to write {}", diff_stat_path.display()))?;
     let changed_files = git_changed_files(&sandbox.checkout_path).await?;
+    let mut result = ActionResult::ok(message)
+        .with_diff_stat(diff_stat)
+        .with_changed_files(changed_files);
 
-    Ok(ActionExecution::continue_with(
-        ActionResult::ok(message)
-            .with_diff_stat(diff_stat)
-            .with_changed_files(changed_files),
-    ))
+    if let Some((content, bytes)) = file_content_for_prompt(changed_path, sandbox, limits).await {
+        result.message.push_str(
+            "; current file content is included below. If this addressed the last requested item, return done instead of repeating the edit.",
+        );
+        result = result.with_content(content, bytes);
+    }
+
+    Ok(ActionExecution::continue_with(result))
 }
 
 async fn finish_outcome(
@@ -1373,6 +1415,38 @@ fn consecutive_action_repetitions(
         .count()
 }
 
+fn should_finish_after_repeated_write_edit(
+    history: &[PromptHistoryEntry],
+    action: &ChangeAction,
+    prompt_action: &serde_json::Value,
+) -> bool {
+    if !matches!(
+        action,
+        ChangeAction::WriteFile { .. } | ChangeAction::EditFile { .. }
+    ) {
+        return false;
+    }
+
+    history
+        .iter()
+        .rev()
+        .take_while(|entry| entry.action == *prompt_action)
+        .any(|entry| {
+            let status_is_ok = entry
+                .result
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                == Some("ok");
+            let has_changed_files = entry
+                .result
+                .get("changed_files")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|files| !files.is_empty());
+
+            status_is_ok && has_changed_files
+        })
+}
+
 const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
 const MAX_SEARCH_RESULTS: usize = 40;
 const MAX_SEARCH_PREVIEW_CHARS: usize = 240;
@@ -1454,5 +1528,58 @@ mod tests {
         ];
 
         assert_eq!(consecutive_action_repetitions(&history, &repeated), 1);
+    }
+
+    #[test]
+    fn repeated_successful_edit_can_finish_with_progress() {
+        let action = ChangeAction::EditFile {
+            path: "README.md".to_owned(),
+            old_text: "old".to_owned(),
+            new_text: "new".to_owned(),
+        };
+        let prompt_action = action.for_prompt();
+        let history = vec![
+            PromptHistoryEntry {
+                iteration: 1,
+                action: prompt_action.clone(),
+                result: serde_json::json!({
+                    "status": "ok",
+                    "changed_files": ["README.md"],
+                }),
+            },
+            PromptHistoryEntry {
+                iteration: 2,
+                action: prompt_action.clone(),
+                result: serde_json::json!({"status": "error"}),
+            },
+        ];
+
+        assert!(should_finish_after_repeated_write_edit(
+            &history,
+            &action,
+            &prompt_action
+        ));
+    }
+
+    #[test]
+    fn repeated_read_does_not_finish_with_progress() {
+        let action = ChangeAction::ReadFile {
+            path: "README.md".to_owned(),
+        };
+        let prompt_action = action.for_prompt();
+        let history = vec![PromptHistoryEntry {
+            iteration: 1,
+            action: prompt_action.clone(),
+            result: serde_json::json!({
+                "status": "ok",
+                "changed_files": ["README.md"],
+            }),
+        }];
+
+        assert!(!should_finish_after_repeated_write_edit(
+            &history,
+            &action,
+            &prompt_action
+        ));
     }
 }

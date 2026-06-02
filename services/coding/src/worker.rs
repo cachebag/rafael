@@ -1076,9 +1076,23 @@ async fn collect_pull_request_feedback(
     let reviews = github
         .pull_request_reviews(token, repo, pull_number)
         .await?;
-    let review_comments = github
-        .pull_request_review_comments(token, repo, pull_number)
-        .await?;
+    let review_comments = match github
+        .unresolved_pull_request_review_comments(token, repo, pull_number)
+        .await
+    {
+        Ok(comments) => comments,
+        Err(err) => {
+            warn!(
+                repo = %repo,
+                pull = pull_number,
+                error = %err,
+                "failed to fetch unresolved pull request review threads; falling back to review comments"
+            );
+            github
+                .pull_request_review_comments(token, repo, pull_number)
+                .await?
+        }
+    };
 
     Ok(PullRequestFeedback {
         reviews: reviews
@@ -1091,7 +1105,6 @@ async fn collect_pull_request_feedback(
                     .body
                     .as_deref()
                     .is_some_and(|body| !body.trim().is_empty())
-                    || review.state.eq_ignore_ascii_case("changes_requested")
             })
             .take(MAX_FEEDBACK_ITEMS)
             .collect(),
@@ -1114,7 +1127,7 @@ async fn collect_pull_request_feedback(
 
 fn pull_request_revision_plan(state: &PullRequestState, feedback: &PullRequestFeedback) -> String {
     format!(
-        "Revise existing pull request #{} on branch `{}`.\n\nDo not create a new branch or a new pull request. The current GitHub PR state below is the source of truth at the start of this run; do not infer PR state from previous failed local run artifacts. Address the trusted PR review feedback against that PR state, keep the change scoped, and update the existing branch. If feedback asks to revert a file, remove that file's changes from the PR diff. If the feedback is missing, ambiguous, or conflicts with repository safety, return done with status blocked and ask a concrete question.\n\nPull request title:\n{}\n\nPull request body:\n{}\n\nCurrent GitHub PR state:\n{}\n\nTrusted review feedback:\n{}",
+        "Revise existing pull request #{} on branch `{}`.\n\nDo not create a new branch or a new pull request. The current GitHub PR state below is the source of truth at the start of this run; do not infer PR state from previous failed local run artifacts. Address the trusted unresolved PR review feedback against that PR state, keep the change scoped, and update the existing branch. If feedback asks to revert a file, remove that file's changes from the PR diff. If the feedback is missing, ambiguous, or conflicts with repository safety, return done with status blocked and ask a concrete question.\n\nPull request title:\n{}\n\nPull request body:\n{}\n\nCurrent GitHub PR state:\n{}\n\nTrusted unresolved review feedback:\n{}",
         state.number,
         state.head_ref,
         state.title,
