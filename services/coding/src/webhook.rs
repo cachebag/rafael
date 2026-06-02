@@ -271,11 +271,11 @@ mod tests {
                 installation_id: Some(2),
                 private_key_path: PathBuf::from("/tmp/key.pem"),
                 webhook_secret: Some("secret".to_owned()),
-                app_slug: "jonah".to_owned(),
-                collaborator_login: "jonah[bot]".to_owned(),
+                app_slug: "netshared".to_owned(),
+                collaborator_login: "netshared[bot]".to_owned(),
                 allowed_repos: vec!["cachebag/rafael".to_owned()],
-                implementation_label: "jonah:implement".to_owned(),
-                command_mention: "@jonah".to_owned(),
+                implementation_label: "netshared:implement".to_owned(),
+                command_mention: "@netshared".to_owned(),
                 trusted_users: vec!["cachebag".to_owned()],
                 blocking_labels: vec!["blocked".to_owned()],
                 enable_assignment_trigger: false,
@@ -315,7 +315,7 @@ mod tests {
             "action": "labeled",
             "issue": {
                 "number": 7,
-                "labels": [{"name":"jonah:implement"}]
+                "labels": [{"name":"netshared:implement"}]
             },
             "repository": {
                 "name": "rafael",
@@ -324,7 +324,7 @@ mod tests {
             },
             "installation": {"id": 42},
             "sender": {"login":"cachebag"},
-            "label": {"name":"jonah:implement"}
+            "label": {"name":"netshared:implement"}
         }"#;
 
         let decision = evaluate_event(&test_config(), "issues", "delivery-1", body).unwrap();
@@ -346,7 +346,7 @@ mod tests {
                 "number": 8,
                 "labels": []
             },
-            "comment": {"body":"@jonah implement"},
+            "comment": {"body":"@netshared implement"},
             "repository": {
                 "name": "rafael",
                 "default_branch": "master",
@@ -374,7 +374,7 @@ mod tests {
                 "number": 8,
                 "labels": []
             },
-            "comment": {"body":"@jonah implement"},
+            "comment": {"body":"@netshared implement"},
             "repository": {
                 "name": "rafael",
                 "default_branch": "master",
