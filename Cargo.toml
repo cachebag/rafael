@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/client",
+  "crates/config",
+  "crates/common",
+  "crates/events",
+  "crates/memory",
+  "crates/tool-registry",
+  "crates/tools/filesystem",
+  "crates/tools/shell",
+  "crates/tools/git",
+  "crates/tools/docker",
+  "crates/tools/tailscale",
+  "crates/tools/systemd",
+  "services/chat",
+  "services/coding",
+  "services/automation",
+  "services/health",
+  "services/homelab",
+]
