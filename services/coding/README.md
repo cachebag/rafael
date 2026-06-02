@@ -22,7 +22,4 @@ cargo run -- check-config
 ```
 
 
-## Setup
-Ensure that all dependencies are correctly installed and that the environment variables are set as required by the configuration.
-
 
