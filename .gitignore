@@ -1,0 +1,14 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# TypeScript
+node_modules/
+dist/
+build/
+*.js.map
+*.d.ts
+tsconfig.tsbuildinfo
+.tsbuildinfo
+
