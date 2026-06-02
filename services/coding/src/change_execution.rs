@@ -150,15 +150,12 @@ pub async fn execute_change_loop(
             )
             .await;
         }
-        if repeat_count > 0 && action.is_observation() {
-            let result = ActionResult::error(
-                "same read/search action was just attempted; use the prior result and choose a different action".to_owned(),
-            );
+        if repeat_count > 0 {
+            let result = repeated_action_result(&action, &sandbox, &limits).await?;
             append_transcript(&transcript_path, iteration, "result", &result).await?;
             history.push(prompt_history_entry(iteration, prompt_action, &result));
             continue;
         }
-
         let execution =
             execute_action(&action, &sandbox, run_dir, &diff_stat_path, &limits).await?;
 
@@ -279,6 +276,65 @@ async fn execute_action(
             })
         }
     }
+}
+
+async fn repeated_action_result(
+    action: &ChangeAction,
+    sandbox: &RepoSandbox,
+    limits: &ExecutionLimits,
+) -> anyhow::Result<ActionResult> {
+    let message = match action {
+        ChangeAction::ReadFile { .. } | ChangeAction::Search { .. } => {
+            "same read/search action was just attempted; use the prior result and choose a different action".to_owned()
+        }
+        ChangeAction::WriteFile { .. } | ChangeAction::EditFile { .. } => {
+            "same write/edit action was just attempted. If the previous result was ok, that change is already applied; do not repeat it. Inspect the current file content below, address the next requested feedback item, or return done only after all feedback is complete.".to_owned()
+        }
+        ChangeAction::Done { .. } => {
+            "same done action was just attempted; choose a different action only if more work remains".to_owned()
+        }
+    };
+
+    let mut result = ActionResult::error(message);
+
+    if let Some((content, bytes)) = action_file_content_for_prompt(action, sandbox, limits).await {
+        result = result.with_content(content, bytes);
+    }
+
+    if let Ok(diff_stat) = git_diff_stat(&sandbox.checkout_path).await {
+        if !diff_stat.trim().is_empty() {
+            result = result.with_diff_stat(diff_stat);
+        }
+    }
+    if let Ok(changed_files) = git_changed_files(&sandbox.checkout_path).await {
+        if !changed_files.is_empty() {
+            result = result.with_changed_files(changed_files);
+        }
+    }
+
+    Ok(result)
+}
+
+async fn action_file_content_for_prompt(
+    action: &ChangeAction,
+    sandbox: &RepoSandbox,
+    limits: &ExecutionLimits,
+) -> Option<(String, u64)> {
+    let path = action.target_path()?;
+    let absolute_path = sandbox.existing_file(path).await.ok()?;
+    let metadata = tokio::fs::metadata(&absolute_path).await.ok()?;
+    if metadata.len() > limits.max_read_bytes {
+        return None;
+    }
+
+    let bytes = tokio::fs::read(&absolute_path).await.ok()?;
+    if bytes.contains(&0) {
+        return None;
+    }
+
+    String::from_utf8(bytes)
+        .ok()
+        .map(|content| (content, metadata.len()))
 }
 
 async fn read_file_action(
@@ -508,9 +564,12 @@ async fn edit_file_action(
 
     let occurrence_count = content.match_indices(old_text).count();
     if occurrence_count != 1 {
-        return Ok(ActionExecution::continue_with(ActionResult::error(
-            format!("old_text must match exactly once; found {occurrence_count} matches"),
-        )));
+        return Ok(ActionExecution::continue_with(
+            ActionResult::error(format!(
+                "old_text must match exactly once; found {occurrence_count} matches. Use the current file content and choose a corrected edit, another feedback item, or done if all feedback is addressed."
+            ))
+            .with_content(content, metadata.len()),
+        ));
     }
 
     let updated = content.replacen(old_text, new_text, 1);
@@ -633,7 +692,7 @@ fn build_action_prompt(
         .context("failed to serialize change execution history")?;
 
     Ok(format!(
-        "Repository: {}\nDefault branch: {}\nTarget branch: {}\nIssue #{}: {}\nLabels: {}\nIssue body:\n{}\n\nImplementation plan:\n{}\n\nRepository context JSON:\n{}\n\nPrior tool history JSON:\n{}\n\nYou are editing the prepared local branch through a bounded tool loop. Choose exactly one next action and return exactly one JSON object with no Markdown, comments, or extra text. Available actions:\n- {{\"action\":\"read_file\",\"path\":\"relative/path\"}}\n- {{\"action\":\"search\",\"query\":\"case-insensitive literal text\",\"path\":\"optional/relative/scope\"}}\n- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"complete file contents\"}}\n- {{\"action\":\"edit_file\",\"path\":\"relative/path\",\"old_text\":\"exact text appearing once\",\"new_text\":\"replacement text\"}}\n- {{\"action\":\"done\",\"status\":\"completed\",\"summary\":\"what changed\"}}\n- {{\"action\":\"done\",\"status\":\"blocked\",\"summary\":\"why blocked\",\"question\":\"what you need clarified\"}}\n\nConstraints:\n- Paths must be repository-relative, inside the checkout, and must not use .git, parent traversal, absolute paths, or known secret files.\n- Do not request shell commands, commits, pushes, branch changes, package installs, or network calls.\n- Keep changes minimal and focused on the issue. Prefer read_file/search before edits when context is missing.\n- write_file content must be at most {} bytes; reads are capped at {} bytes; the run may change at most {} files.\n- If the requested change cannot be completed safely with these actions, return done with status blocked.",
+        "Repository: {}\nDefault branch: {}\nTarget branch: {}\nIssue #{}: {}\nLabels: {}\nIssue body:\n{}\n\nImplementation plan:\n{}\n\nRepository context JSON:\n{}\n\nPrior tool history JSON:\n{}\n\nYou are editing the prepared local branch through a bounded tool loop. Choose exactly one next action and return exactly one JSON object with no Markdown, comments, or extra text. Available actions:\n- {{\"action\":\"read_file\",\"path\":\"relative/path\"}}\n- {{\"action\":\"search\",\"query\":\"case-insensitive literal text\",\"path\":\"optional/relative/scope\"}}\n- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"complete file contents\"}}\n- {{\"action\":\"edit_file\",\"path\":\"relative/path\",\"old_text\":\"exact text appearing once\",\"new_text\":\"replacement text\"}}\n- {{\"action\":\"done\",\"status\":\"completed\",\"summary\":\"what changed\"}}\n- {{\"action\":\"done\",\"status\":\"blocked\",\"summary\":\"why blocked\",\"question\":\"what you need clarified\"}}\n\nConstraints:\n- Paths must be repository-relative, inside the checkout, and must not use .git, parent traversal, absolute paths, or known secret files.\n- Do not request shell commands, commits, pushes, branch changes, package installs, or network calls.\n- Keep changes minimal and focused on the issue. Prefer read_file/search before edits when context is missing.\n- Treat trusted review feedback in the implementation plan as a checklist. After a successful write/edit, move to the next unaddressed feedback item. Do not repeat the same edit.\n- If old_text no longer matches, the file may already be changed; use the current file content from tool history, read the file, or choose the next file.\n- Return done with status completed only after every requested feedback item is addressed.\n- write_file content must be at most {} bytes; reads are capped at {} bytes; the run may change at most {} files.\n- If the requested change cannot be completed safely with these actions, return done with status blocked.",
         repo.full_name,
         repo.default_branch,
         branch_name,
@@ -1136,8 +1195,14 @@ impl ChangeAction {
         }
     }
 
-    fn is_observation(&self) -> bool {
-        matches!(self, Self::ReadFile { .. } | Self::Search { .. })
+    fn target_path(&self) -> Option<&str> {
+        match self {
+            Self::ReadFile { path }
+            | Self::WriteFile { path, .. }
+            | Self::EditFile { path, .. } => Some(path),
+            Self::Search { path, .. } => path.as_deref(),
+            Self::Done { .. } => None,
+        }
     }
 }
 
