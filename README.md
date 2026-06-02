@@ -27,6 +27,4 @@ infra/systemd/llama-server.service
 # License 
 MIT 
 
-## Systemd Service Management
-
 
