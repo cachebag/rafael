@@ -7,6 +7,7 @@ use tokio::{process::Command, time::timeout};
 use tracing::{info, warn};
 
 use crate::{
+    change_execution::{ChangeExecutionRequest, ChangeExecutionStatus, execute_change_loop},
     config::AppConfig,
     github::{GitHubClient, InstallationToken, IssueInfo, RepositoryInfo},
     model::ModelClient,
@@ -30,6 +31,11 @@ pub struct RunState {
     pub worktree_path: Option<PathBuf>,
     pub context_path: Option<PathBuf>,
     pub plan_path: Option<PathBuf>,
+    pub transcript_path: Option<PathBuf>,
+    pub diff_stat_path: Option<PathBuf>,
+    pub changed_files: Vec<String>,
+    pub implementation_summary: Option<String>,
+    pub error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -41,6 +47,9 @@ pub enum RunStatus {
     Authenticated,
     Prepared,
     Planned,
+    Implementing,
+    Completed,
+    Blocked,
     Failed,
 }
 
@@ -78,6 +87,11 @@ async fn run_issue_triggered_inner(config: AppConfig, trigger: IssueTrigger) -> 
         worktree_path: None,
         context_path: None,
         plan_path: None,
+        transcript_path: None,
+        diff_stat_path: None,
+        changed_files: Vec::new(),
+        implementation_summary: None,
+        error: None,
         created_at: created_at.clone(),
         updated_at: created_at,
     };
@@ -152,7 +166,7 @@ async fn run_issue_triggered_inner(config: AppConfig, trigger: IssueTrigger) -> 
         .issue_plan(&repo, &issue, &branch_name, &repo_context)
         .await?;
     let plan_path = run_dir.join("plan.md");
-    tokio::fs::write(&plan_path, plan)
+    tokio::fs::write(&plan_path, &plan)
         .await
         .with_context(|| format!("failed to write {}", plan_path.display()))?;
 
@@ -161,26 +175,121 @@ async fn run_issue_triggered_inner(config: AppConfig, trigger: IssueTrigger) -> 
     state.updated_at = now_rfc3339();
     write_state(&run_dir, &state).await?;
 
-    post_comment_best_effort(
-        &github,
-        &token,
-        &trigger.repo,
-        trigger.issue_number,
-        &format!(
-            "Prepared branch `{branch_name}` and completed phase-one planning. Code editing and PR creation are not enabled in this build yet."
-        ),
-    )
-    .await;
+    state.status = RunStatus::Implementing;
+    state.transcript_path = Some(run_dir.join("transcript.jsonl"));
+    state.updated_at = now_rfc3339();
+    write_state(&run_dir, &state).await?;
+
+    let outcome = match execute_change_loop(ChangeExecutionRequest {
+        config: &config,
+        model: &model,
+        repo: &repo,
+        issue: &issue,
+        branch_name: &branch_name,
+        repo_context: &repo_context,
+        plan: &plan,
+        checkout_path: &worktree_path,
+        run_dir: &run_dir,
+    })
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            state.status = RunStatus::Failed;
+            state.error = Some(format!("change execution failed: {err}"));
+            state.updated_at = now_rfc3339();
+            write_state(&run_dir, &state).await?;
+            return Err(err).context("change execution failed");
+        }
+    };
+
+    state.transcript_path = Some(outcome.transcript_path.clone());
+    state.diff_stat_path = outcome.diff_stat_path.clone();
+    state.changed_files = outcome.changed_files.clone();
+    state.implementation_summary = Some(outcome.summary.clone());
+    state.updated_at = now_rfc3339();
+
+    match outcome.status {
+        ChangeExecutionStatus::Completed => {
+            state.status = RunStatus::Completed;
+            write_state(&run_dir, &state).await?;
+            post_comment_best_effort(
+                &github,
+                &token,
+                &trigger.repo,
+                trigger.issue_number,
+                &implementation_completed_comment(&branch_name, &outcome.changed_files),
+            )
+            .await;
+        }
+        ChangeExecutionStatus::Blocked => {
+            state.status = RunStatus::Blocked;
+            state.error = Some(outcome.summary.clone());
+            write_state(&run_dir, &state).await?;
+            post_comment_best_effort(
+                &github,
+                &token,
+                &trigger.repo,
+                trigger.issue_number,
+                &implementation_blocked_comment(
+                    &branch_name,
+                    &outcome.summary,
+                    outcome.question.as_deref(),
+                ),
+            )
+            .await;
+            return Ok(());
+        }
+        ChangeExecutionStatus::MaxIterations
+        | ChangeExecutionStatus::MaxRuntime
+        | ChangeExecutionStatus::UnsafeRequest => {
+            state.status = RunStatus::Failed;
+            state.error = Some(outcome.summary.clone());
+            write_state(&run_dir, &state).await?;
+            bail!("change execution stopped: {}", outcome.summary);
+        }
+    }
 
     info!(
         repo = %trigger.repo,
         issue = trigger.issue_number,
         branch = %branch_name,
         run_id = %trigger.run_id,
-        "prepared phase-one coding run"
+        changed_files = ?outcome.changed_files,
+        "completed bounded local change execution"
     );
 
     Ok(())
+}
+
+fn implementation_completed_comment(branch_name: &str, changed_files: &[String]) -> String {
+    let changed_files = if changed_files.is_empty() {
+        "(none reported)".to_owned()
+    } else {
+        changed_files
+            .iter()
+            .map(|path| format!("- `{path}`"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    format!(
+        "Prepared branch `{branch_name}` and completed bounded local code changes.\n\nChanged files:\n{changed_files}\n\nNo commit, push, verification, or PR creation was performed in this slice."
+    )
+}
+
+fn implementation_blocked_comment(
+    branch_name: &str,
+    summary: &str,
+    question: Option<&str>,
+) -> String {
+    let question = question
+        .map(|question| format!("\n\nQuestion: {question}"))
+        .unwrap_or_default();
+
+    format!(
+        "Prepared branch `{branch_name}`, but the bounded implementation loop is blocked.\n\nReason: {summary}{question}"
+    )
 }
 
 async fn post_comment_best_effort(
