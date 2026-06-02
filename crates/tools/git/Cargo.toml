@@ -7,4 +7,4 @@ edition = "2024"
 base64 = "0.22.1"
 serde = { version = "1.0.228", features = ["derive"] }
 shell = { path = "../shell" }
-thiserror = "2.0.17"
+thiserror = "2.0.18"
