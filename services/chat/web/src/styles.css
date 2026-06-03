@@ -211,6 +211,45 @@ input:disabled {
   transform: translateY(-1px);
 }
 
+.copy-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  opacity: 0.52;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.copy-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--line) 72%, transparent);
+  background: color-mix(in srgb, var(--panel-soft) 74%, transparent);
+  color: var(--text);
+  opacity: 1;
+}
+
+.copy-button-icon {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.copy-button-labeled {
+  min-height: 1.9rem;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+}
+
+.copy-button-text {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .status-pill {
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -221,6 +260,7 @@ input:disabled {
 }
 
 .message-bubble {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
@@ -230,8 +270,41 @@ input:disabled {
 }
 
 .message-bubble-model {
+  position: relative;
   margin-right: auto;
   max-width: calc(100% - 2rem);
+}
+
+.message-bubble-copyable {
+  padding-right: 3rem;
+}
+
+.message-output {
+  position: static;
+}
+
+.message-output-actions {
+  position: absolute;
+  right: 0.55rem;
+  bottom: 0.55rem;
+  display: flex;
+  pointer-events: none;
+  transform: translateX(0.25rem);
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.message-copy-button {
+  opacity: 0.72;
+}
+
+.message-bubble-model:hover .message-output-actions,
+.message-bubble-model:focus-within .message-output-actions {
+  pointer-events: auto;
+  transform: translateX(0);
+  opacity: 1;
 }
 
 .markdown-content {
@@ -252,6 +325,7 @@ input:disabled {
 .markdown-content ol,
 .markdown-content blockquote,
 .markdown-content pre,
+.markdown-content .code-block-shell,
 .markdown-content table {
   margin: 0.8rem 0;
 }
@@ -342,6 +416,22 @@ input:disabled {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
 }
 
+.markdown-content .code-block-shell {
+  position: relative;
+}
+
+.markdown-content .code-block-shell pre {
+  margin: 0;
+}
+
+.code-copy-button {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+  z-index: 1;
+  background: color-mix(in srgb, var(--code-bg) 80%, transparent);
+}
+
 .markdown-content pre code {
   display: block;
   min-width: max-content;
@@ -351,7 +441,7 @@ input:disabled {
   color: var(--code-text);
   font-size: 0.8125rem;
   line-height: 1.65;
-  padding: 0.9rem;
+  padding: 0.9rem 3.2rem 0.9rem 0.9rem;
 }
 
 .markdown-content table {
@@ -538,5 +628,13 @@ input:disabled {
 
   .status-pill {
     display: none;
+  }
+}
+
+@media (hover: none) {
+  .message-output-actions {
+    pointer-events: auto;
+    transform: translateX(0);
+    opacity: 0.68;
   }
 }
