@@ -38,6 +38,7 @@ async fn main() -> anyhow::Result<()> {
                 web_dist = %config.web_dist.display(),
                 default_provider = %config.default_provider.id,
                 default_model = %config.default_provider.model,
+                model_list_timeout_seconds = config.model_list_timeout.as_secs(),
                 "configuration loaded"
             );
             Ok(())

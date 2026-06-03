@@ -8,13 +8,13 @@ branch and pull request through the GitHub App installation.
 This is not a general-purpose bot. It is wired for the local Rafael setup:
 
 - model API: `http://rafael:8080/v1`
-- model name: `Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M`
+- model name: `qwen3-coder`
 - GitHub App slug: `netshared`
 - implementation label: `netshared:implement`
 - command mention: `@netshared`
 - default bind address: `127.0.0.1:3030`
 
-The model endpoint is served by `infra/systemd/llama-server.service`.
+The model endpoint is served by `infra/systemd/llama-swap.service`.
 
 ## Commands
 
@@ -182,7 +182,7 @@ Model defaults:
 | Variable | Default |
 | --- | --- |
 | `RAFAEL_MODEL_BASE_URL` | `http://rafael:8080/v1` |
-| `RAFAEL_MODEL_NAME` | `Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M` |
+| `RAFAEL_MODEL_NAME` | `qwen3-coder` |
 
 GitHub behavior defaults:
 

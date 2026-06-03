@@ -69,10 +69,7 @@ impl AppConfig {
         Ok(Self {
             model: ModelConfig {
                 base_url: env_or("RAFAEL_MODEL_BASE_URL", "http://rafael:8080/v1"),
-                name: env_or(
-                    "RAFAEL_MODEL_NAME",
-                    "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M",
-                ),
+                name: env_or("RAFAEL_MODEL_NAME", "qwen3-coder"),
             },
             github: GitHubConfig {
                 app_id,

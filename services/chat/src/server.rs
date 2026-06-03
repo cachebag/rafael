@@ -11,6 +11,7 @@ use axum::{
     routing::{get, patch, post},
 };
 use chrono::Utc;
+use client::ModelInfo;
 use common::{SafeComponent, slugify};
 use serde::Serialize;
 use tokio::{
@@ -27,8 +28,8 @@ use crate::{
     store::{ChatStore, clean_optional, new_id},
     types::{
         ChatConfigFile, ChatMessageRecord, ChatRole, ChatStateResponse, Conversation,
-        CreateConversationRequest, PublicProvider, SaveProviderRequest, SendMessageRequest,
-        StoredProvider, UpdateConversationRequest, UpdateSettingsRequest,
+        CreateConversationRequest, ProviderKind, PublicProvider, SaveProviderRequest,
+        SendMessageRequest, StoredProvider, UpdateConversationRequest, UpdateSettingsRequest,
     },
 };
 
@@ -92,14 +93,13 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
 
 async fn get_state(State(state): State<ServerState>) -> Result<Json<ChatStateResponse>, ApiError> {
     let config = state.chat_config().await?;
+    let providers = state.runtime_providers(&config).await;
+    let active_provider_id =
+        active_provider_id(&config, &providers, &state.config.default_provider);
     let conversations = state.store.list_conversations().await?;
     Ok(Json(ChatStateResponse {
-        providers: config
-            .providers
-            .iter()
-            .map(PublicProvider::from_stored)
-            .collect(),
-        active_provider_id: config.settings.active_provider_id,
+        providers: providers.iter().map(PublicProvider::from_stored).collect(),
+        active_provider_id,
         theme: config.settings.theme,
         conversations,
     }))
@@ -172,15 +172,17 @@ async fn send_message(
     let content = clean_required(request.content, "message content")?;
     let _guard = state.writes.lock().await;
     let config = state.chat_config().await?;
+    let providers = state.runtime_providers(&config).await;
+    let default_provider_id =
+        active_provider_id(&config, &providers, &state.config.default_provider);
     let provider_id = request
         .provider_id
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(&config.settings.active_provider_id)
+        .unwrap_or(&default_provider_id)
         .to_owned();
-    let provider = config
-        .providers
+    let provider = providers
         .iter()
         .find(|provider| provider.id == provider_id)
         .ok_or_else(|| ApiError::bad_request("selected provider does not exist"))?;
@@ -266,14 +268,16 @@ async fn stream_message_worker(
         .store
         .load_or_initialize_config(&state.config.default_provider)
         .await?;
+    let providers = state.runtime_providers(&config).await;
+    let default_provider_id =
+        active_provider_id(&config, &providers, &state.config.default_provider);
     let provider_id = requested_provider_id
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(&config.settings.active_provider_id)
+        .unwrap_or(&default_provider_id)
         .to_owned();
-    let provider = config
-        .providers
+    let provider = providers
         .iter()
         .find(|provider| provider.id == provider_id)
         .ok_or_else(|| anyhow::anyhow!("selected provider does not exist"))?
@@ -348,8 +352,8 @@ async fn save_provider(
         None => config.providers.push(provider),
     }
 
-    if !config
-        .providers
+    let providers = state.runtime_providers(&config).await;
+    if !providers
         .iter()
         .any(|provider| provider.id == config.settings.active_provider_id)
     {
@@ -366,6 +370,7 @@ async fn update_settings(
 ) -> Result<Json<ChatStateResponse>, ApiError> {
     let _guard = state.writes.lock().await;
     let mut config = state.chat_config().await?;
+    let providers = state.runtime_providers(&config).await;
 
     if let Some(active_provider_id) = request
         .active_provider_id
@@ -378,6 +383,7 @@ async fn update_settings(
         if !config
             .providers
             .iter()
+            .chain(providers.iter())
             .any(|provider| provider.id == active_provider_id)
         {
             return Err(ApiError::bad_request("active provider does not exist"));
@@ -390,14 +396,13 @@ async fn update_settings(
     }
 
     state.store.save_config(&config).await?;
+    let providers = state.runtime_providers(&config).await;
+    let active_provider_id =
+        active_provider_id(&config, &providers, &state.config.default_provider);
     let conversations = state.store.list_conversations().await?;
     Ok(Json(ChatStateResponse {
-        providers: config
-            .providers
-            .iter()
-            .map(PublicProvider::from_stored)
-            .collect(),
-        active_provider_id: config.settings.active_provider_id,
+        providers: providers.iter().map(PublicProvider::from_stored).collect(),
+        active_provider_id,
         theme: config.settings.theme,
         conversations,
     }))
@@ -410,6 +415,125 @@ impl ServerState {
             .load_or_initialize_config(&self.config.default_provider)
             .await?)
     }
+
+    async fn runtime_providers(&self, config: &ChatConfigFile) -> Vec<StoredProvider> {
+        match model::list_models(
+            &self.config.default_provider,
+            self.config.model_list_timeout,
+        )
+        .await
+        {
+            Ok(models) if !models.is_empty() => {
+                let mut providers = config
+                    .providers
+                    .iter()
+                    .filter(|provider| {
+                        !same_openai_endpoint(provider, &self.config.default_provider)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                providers.extend(discovered_providers(&self.config.default_provider, models));
+                providers
+            }
+            Ok(_) => config.providers.clone(),
+            Err(err) => {
+                warn!(
+                    base_url = %self.config.default_provider.base_url,
+                    error = %err,
+                    "failed to discover model list; using saved providers"
+                );
+                config.providers.clone()
+            }
+        }
+    }
+}
+
+fn discovered_providers(source: &StoredProvider, models: Vec<ModelInfo>) -> Vec<StoredProvider> {
+    let mut providers = Vec::new();
+
+    for model in models {
+        let model_id = model.id.trim();
+        if model_id.is_empty() {
+            continue;
+        }
+
+        let id = provider_id_for_model(model_id, &providers);
+        let name = model
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != model_id)
+            .unwrap_or(model_id)
+            .to_owned();
+
+        providers.push(StoredProvider {
+            id,
+            name,
+            kind: ProviderKind::OpenAiCompatible,
+            base_url: source.base_url.clone(),
+            model: model_id.to_owned(),
+            api_key: source.api_key.clone(),
+            system_prompt: source.system_prompt.clone(),
+        });
+    }
+
+    providers
+}
+
+fn provider_id_for_model(model_id: &str, existing: &[StoredProvider]) -> String {
+    let base = if SafeComponent::parse(model_id.to_owned()).is_ok() {
+        model_id.to_owned()
+    } else {
+        slugify(model_id, 64, "model")
+    };
+
+    if !existing.iter().any(|provider| provider.id == base) {
+        return base;
+    }
+
+    let mut index = 2;
+    loop {
+        let candidate = format!("{base}-{index}");
+        if !existing.iter().any(|provider| provider.id == candidate) {
+            return candidate;
+        }
+        index += 1;
+    }
+}
+
+fn same_openai_endpoint(left: &StoredProvider, right: &StoredProvider) -> bool {
+    left.kind == ProviderKind::OpenAiCompatible
+        && right.kind == ProviderKind::OpenAiCompatible
+        && normalize_base_url(&left.base_url) == normalize_base_url(&right.base_url)
+}
+
+fn normalize_base_url(value: &str) -> String {
+    value.trim().trim_end_matches('/').to_owned()
+}
+
+fn active_provider_id(
+    config: &ChatConfigFile,
+    providers: &[StoredProvider],
+    default_provider: &StoredProvider,
+) -> String {
+    if providers
+        .iter()
+        .any(|provider| provider.id == config.settings.active_provider_id)
+    {
+        return config.settings.active_provider_id.clone();
+    }
+
+    if providers
+        .iter()
+        .any(|provider| provider.id == default_provider.model)
+    {
+        return default_provider.model.clone();
+    }
+
+    providers
+        .first()
+        .map(|provider| provider.id.clone())
+        .unwrap_or_else(|| config.settings.active_provider_id.clone())
 }
 
 fn normalize_provider(
