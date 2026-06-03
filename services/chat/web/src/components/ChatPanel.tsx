@@ -109,7 +109,7 @@ export function ChatPanel({
   }
 
   return (
-    <section className="flex h-dvh min-h-0 flex-col overflow-hidden">
+    <section className="flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden">
       <header className="header-shell border-b border-[var(--line)] px-3 py-3 sm:px-5 sm:py-4">
         <div className="flex items-center justify-between gap-3 sm:gap-4">
           <div className="flex min-w-0 items-center gap-3">
@@ -143,7 +143,7 @@ export function ChatPanel({
       <div className="relative min-h-0 flex-1">
         <div
           ref={scrollRef}
-          className="h-full overflow-y-auto px-3 py-4 sm:px-5 sm:py-7"
+          className="h-full min-w-0 overflow-x-hidden overflow-y-auto px-3 py-4 sm:px-5 sm:py-7"
           onScroll={updateFollowFromScrollPosition}
           onWheel={interruptFollow}
           onPointerDown={interruptFollow}

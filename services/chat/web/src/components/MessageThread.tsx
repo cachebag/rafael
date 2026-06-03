@@ -13,7 +13,7 @@ export const MessageThread = memo(function MessageThread({
   busy
 }: MessageThreadProps) {
   return (
-    <div className="grid w-full gap-5">
+    <div className="grid w-full min-w-0 gap-5">
       {messages.map((message, index) => (
         <MessageBubble
           key={message.id}
@@ -37,7 +37,7 @@ const MessageBubble = memo(function MessageBubble({
   return (
     <article
       className={[
-        "flex w-full",
+        "flex w-full min-w-0",
         message.role === "user" ? "justify-end" : "justify-start"
       ].join(" ")}
     >
