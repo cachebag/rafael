@@ -54,13 +54,9 @@ export default function App() {
     let active = true;
     setLoading("loading");
     refreshState()
-      .then((nextState) => {
+      .then(() => {
         if (!active) {
           return;
-        }
-        const firstConversation = nextState.conversations[0];
-        if (firstConversation !== undefined) {
-          setSelectedConversationId(firstConversation.id);
         }
         setLoading("ready");
       })
