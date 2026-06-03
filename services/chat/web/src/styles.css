@@ -13,34 +13,66 @@
 }
 
 :root[data-theme="charcoal"] {
-  --bg: #171510;
-  --bg-top: #201c15;
-  --panel: #242019;
-  --panel-soft: #2d281f;
-  --panel-strong: #383127;
-  --selected: #3a3023;
-  --assistant-bg: #1c1a15;
-  --input: #15130f;
-  --line: #504838;
-  --text: #efe6d3;
-  --muted: #aa9d86;
-  --accent: #c9955c;
-  --accent-hover: #daa96f;
-  --accent-ink: #191109;
-  --danger: #a9574f;
-  --danger-bg: #2b1816;
-  --danger-text: #f0c4bb;
-  --code-bg: #15130f;
-  --code-border: #473f32;
-  --code-text: #efe2c6;
-  --syntax-muted: #8d826f;
-  --syntax-red: #d08373;
-  --syntax-orange: #d89a5f;
-  --syntax-yellow: #dfbf73;
-  --syntax-green: #b7b874;
-  --syntax-blue: #8fb5a5;
-  --syntax-purple: #bf9ab0;
+  --bg: #101010;
+  --bg-top: #161616;
+  --panel: #181818;
+  --panel-soft: #202020;
+  --panel-strong: #292929;
+  --selected: #22211f;
+  --assistant-bg: #141414;
+  --input: #121212;
+  --line: #343434;
+  --text: #e8e3da;
+  --muted: #9c968d;
+  --accent: #b89b6b;
+  --accent-hover: #c8aa78;
+  --accent-ink: #111111;
+  --danger: #a9605a;
+  --danger-bg: #251918;
+  --danger-text: #efc4bd;
+  --code-bg: #111111;
+  --code-border: #333333;
+  --code-text: #e7dfd2;
+  --syntax-muted: #858585;
+  --syntax-red: #d78779;
+  --syntax-orange: #d39b66;
+  --syntax-yellow: #d2b56d;
+  --syntax-green: #a7b875;
+  --syntax-blue: #85aaa3;
+  --syntax-purple: #b99bae;
   --shadow-soft: 0 10px 30px rgb(0 0 0 / 0.18);
+}
+
+:root[data-theme="charcoal_light"] {
+  color-scheme: light;
+  --bg: #f1f1ef;
+  --bg-top: #e8e8e5;
+  --panel: #fbfbfa;
+  --panel-soft: #ededeb;
+  --panel-strong: #dededa;
+  --selected: #e4e1da;
+  --assistant-bg: #f7f7f5;
+  --input: #ffffff;
+  --line: #c9c7c0;
+  --text: #202020;
+  --muted: #6d6860;
+  --accent: #89724d;
+  --accent-hover: #6f5c3f;
+  --accent-ink: #ffffff;
+  --danger: #a5534d;
+  --danger-bg: #f2dfdc;
+  --danger-text: #7c312c;
+  --code-bg: #f8f8f6;
+  --code-border: #cfccc4;
+  --code-text: #242424;
+  --syntax-muted: #7a7770;
+  --syntax-red: #9f4f45;
+  --syntax-orange: #9b6a33;
+  --syntax-yellow: #8a6d2b;
+  --syntax-green: #68753e;
+  --syntax-blue: #486f75;
+  --syntax-purple: #80566d;
+  --shadow-soft: 0 10px 30px rgb(0 0 0 / 0.08);
 }
 
 :root[data-theme="gruvbox"] {
@@ -72,6 +104,38 @@
   --syntax-blue: #83a598;
   --syntax-purple: #d3869b;
   --shadow-soft: 0 10px 30px rgb(0 0 0 / 0.2);
+}
+
+:root[data-theme="gruvbox_light"] {
+  color-scheme: light;
+  --bg: #fbf1c7;
+  --bg-top: #f2e5bc;
+  --panel: #f2e5bc;
+  --panel-soft: #ebdbb2;
+  --panel-strong: #d5c4a1;
+  --selected: #e7d7aa;
+  --assistant-bg: #f8ecc2;
+  --input: #fff4cf;
+  --line: #d5c4a1;
+  --text: #3c3836;
+  --muted: #7c6f64;
+  --accent: #b57614;
+  --accent-hover: #af3a03;
+  --accent-ink: #fbf1c7;
+  --danger: #cc241d;
+  --danger-bg: #f1d4c7;
+  --danger-text: #9d0006;
+  --code-bg: #f2e5bc;
+  --code-border: #d5c4a1;
+  --code-text: #3c3836;
+  --syntax-muted: #928374;
+  --syntax-red: #9d0006;
+  --syntax-orange: #af3a03;
+  --syntax-yellow: #b57614;
+  --syntax-green: #79740e;
+  --syntax-blue: #076678;
+  --syntax-purple: #8f3f71;
+  --shadow-soft: 0 10px 30px rgb(60 56 54 / 0.12);
 }
 
 * {
@@ -120,7 +184,7 @@ body {
   inset: 0;
   z-index: 35;
   border: 0;
-  background: rgb(0 0 0 / 0.45);
+  background: transparent;
   opacity: 1;
   transition: opacity 170ms ease;
 }
@@ -217,6 +281,19 @@ input:disabled {
   transform: translateY(-1px);
 }
 
+.icon-button-subtle {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.icon-button-subtle:hover:not(:disabled) {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: color-mix(in srgb, var(--text) 86%, var(--muted));
+  transform: none;
+}
+
 .button-primary {
   background: var(--accent);
   color: var(--accent-ink);
@@ -236,6 +313,64 @@ input:disabled {
 .button-secondary:hover:not(:disabled) {
   background: var(--panel-strong);
   transform: translateY(-1px);
+}
+
+.sidebar-new-button {
+  min-height: 2.15rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 84%, var(--accent));
+}
+
+.sidebar-new-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--line));
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+  transform: none;
+}
+
+.sidebar-settings-button {
+  min-height: 2rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0.35rem 0.45rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.sidebar-settings-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: color-mix(in srgb, var(--text) 86%, var(--muted));
+}
+
+.theme-mode-button {
+  display: inline-flex;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 0.7rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.theme-mode-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--text) 16%, var(--line));
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text);
 }
 
 .copy-button {
@@ -584,6 +719,56 @@ input:disabled {
 
 .composer-input::placeholder {
   color: var(--muted);
+}
+
+.conversation-row {
+  position: relative;
+  border: 1px solid transparent;
+  color: var(--text);
+}
+
+.conversation-row::before {
+  position: absolute;
+  top: 0.55rem;
+  bottom: 0.55rem;
+  left: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  opacity: 0;
+  content: "";
+}
+
+.conversation-row:hover {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.conversation-row-selected {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.conversation-row-selected::before {
+  opacity: 0.88;
+}
+
+.conversation-action-button {
+  color: var(--muted);
+  opacity: 0.55;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.conversation-row:hover .conversation-action-button,
+.conversation-row:focus-within .conversation-action-button {
+  opacity: 0.9;
+}
+
+.conversation-action-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: color-mix(in srgb, var(--text) 88%, var(--muted));
+  opacity: 1;
 }
 
 .conversation-menu-item {

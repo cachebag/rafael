@@ -1,8 +1,16 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { Moon, Sun } from "lucide-react";
 import { saveProvider } from "../api";
 import { compactModelName } from "../display";
-import { themes } from "../themes";
+import {
+  composeTheme,
+  themeBase,
+  themeMode,
+  themes,
+  toggledTheme,
+  type ThemeBaseName
+} from "../themes";
 import type {
   ProviderKind,
   PublicProvider,
@@ -61,6 +69,8 @@ export function SettingsPanel({
     () => providers.find((provider) => provider.id === editingId),
     [editingId, providers]
   );
+  const mode = themeMode(theme);
+  const switchToMode = mode === "dark" ? "light" : "dark";
 
   function chooseProvider(id: string): void {
     setEditingId(id);
@@ -141,18 +151,38 @@ export function SettingsPanel({
             </p>
           ) : null}
           <Field label="Theme">
-            <select
-              className="control"
-              value={theme}
-              disabled={saving}
-              onChange={(event) => void updateTheme(event.target.value as ThemeName)}
-            >
-              {themes.map((themeOption) => (
-                <option key={themeOption.value} value={themeOption.value}>
-                  {themeOption.label}
-                </option>
-              ))}
-            </select>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+              <select
+                className="control"
+                value={themeBase(theme)}
+                disabled={saving}
+                onChange={(event) =>
+                  void updateTheme(
+                    composeTheme(event.target.value as ThemeBaseName, mode)
+                  )
+                }
+              >
+                {themes.map((themeOption) => (
+                  <option key={themeOption.value} value={themeOption.value}>
+                    {themeOption.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="theme-mode-button"
+                disabled={saving}
+                title={`Switch to ${switchToMode} mode`}
+                onClick={() => void updateTheme(toggledTheme(theme))}
+              >
+                {switchToMode === "light" ? (
+                  <Sun aria-hidden="true" size={15} strokeWidth={2.1} />
+                ) : (
+                  <Moon aria-hidden="true" size={15} strokeWidth={2.1} />
+                )}
+                {switchToMode === "light" ? "Light" : "Dark"}
+              </button>
+            </div>
           </Field>
         </div>
 
