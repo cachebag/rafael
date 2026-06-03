@@ -9,7 +9,7 @@ import {
   Sun,
   Trash2
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   providerConnectionLabel,
   providerConnectionTitle
@@ -98,12 +98,13 @@ export function Sidebar({
             </button>
             <button
               type="button"
-              className="button-primary sidebar-new-button inline-flex items-center gap-1.5 whitespace-nowrap"
+              className="icon-button icon-button-subtle"
+              aria-label="New conversation"
+              title="New conversation"
               disabled={busy}
               onClick={onNewConversation}
             >
-              <Plus aria-hidden="true" size={15} strokeWidth={2.2} />
-              New
+              <Plus aria-hidden="true" size={17} strokeWidth={2.1} />
             </button>
           </div>
         </div>
@@ -228,6 +229,14 @@ function ConversationButton({
   onMenuToggle,
   onMenuClose
 }: ConversationButtonProps) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      setConfirmingDelete(false);
+    }
+  }, [menuOpen]);
+
   return (
     <div
       className={[
@@ -268,34 +277,61 @@ function ConversationButton({
       </button>
       {menuOpen ? (
         <div className="conversation-menu absolute right-1 top-9 z-10 min-w-32 rounded-md border border-[var(--line)] bg-[var(--panel)] p-1 shadow-[var(--shadow-soft)]">
-          <button
-            type="button"
-            className="conversation-menu-item"
-            disabled={disabled}
-            onClick={() => {
-              onPin(conversation.id, !conversation.pinned);
-              onMenuClose();
-            }}
-          >
-            {conversation.pinned ? (
-              <PinOff aria-hidden="true" size={14} strokeWidth={2} />
-            ) : (
-              <Pin aria-hidden="true" size={14} strokeWidth={2} />
-            )}
-            {conversation.pinned ? "Unpin" : "Pin"}
-          </button>
-          <button
-            type="button"
-            className="conversation-menu-item conversation-menu-item-danger"
-            disabled={disabled}
-            onClick={() => {
-              onDelete(conversation.id);
-              onMenuClose();
-            }}
-          >
-            <Trash2 aria-hidden="true" size={14} strokeWidth={2} />
-            Delete
-          </button>
+          {confirmingDelete ? (
+            <div className="conversation-delete-confirm">
+              <p>Delete this chat?</p>
+              <div className="conversation-confirm-actions">
+                <button
+                  type="button"
+                  className="conversation-confirm-button"
+                  disabled={disabled}
+                  onClick={() => setConfirmingDelete(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="conversation-confirm-button conversation-confirm-button-danger"
+                  disabled={disabled}
+                  onClick={() => {
+                    onDelete(conversation.id);
+                    setConfirmingDelete(false);
+                    onMenuClose();
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="conversation-menu-item"
+                disabled={disabled}
+                onClick={() => {
+                  onPin(conversation.id, !conversation.pinned);
+                  onMenuClose();
+                }}
+              >
+                {conversation.pinned ? (
+                  <PinOff aria-hidden="true" size={14} strokeWidth={2} />
+                ) : (
+                  <Pin aria-hidden="true" size={14} strokeWidth={2} />
+                )}
+                {conversation.pinned ? "Unpin" : "Pin"}
+              </button>
+              <button
+                type="button"
+                className="conversation-menu-item conversation-menu-item-danger"
+                disabled={disabled}
+                onClick={() => setConfirmingDelete(true)}
+              >
+                <Trash2 aria-hidden="true" size={14} strokeWidth={2} />
+                Delete
+              </button>
+            </>
+          )}
         </div>
       ) : null}
     </div>

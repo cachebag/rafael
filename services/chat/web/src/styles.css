@@ -335,20 +335,6 @@ input:disabled {
   transform: translateY(-1px);
 }
 
-.sidebar-new-button {
-  min-height: 2.15rem;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
-  background: transparent;
-  color: color-mix(in srgb, var(--text) 84%, var(--accent));
-}
-
-.sidebar-new-button:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 46%, var(--line));
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-  color: var(--text);
-  transform: none;
-}
-
 .sidebar-settings-button {
   min-height: 2rem;
   border: 0;
@@ -892,6 +878,49 @@ input:disabled {
 }
 
 .conversation-menu-item-danger {
+  color: var(--danger-text);
+}
+
+.conversation-delete-confirm {
+  display: grid;
+  min-width: 10rem;
+  gap: 0.5rem;
+  padding: 0.45rem;
+}
+
+.conversation-delete-confirm p {
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.conversation-confirm-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+
+.conversation-confirm-button {
+  min-height: 1.85rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.conversation-confirm-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+}
+
+.conversation-confirm-button-danger {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.conversation-confirm-button-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger-bg) 78%, var(--danger) 22%);
   color: var(--danger-text);
 }
 
