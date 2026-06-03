@@ -204,11 +204,7 @@ fn repair_config(
         changed = true;
     }
 
-    if !config
-        .providers
-        .iter()
-        .any(|provider| provider.id == config.settings.active_provider_id)
-    {
+    if config.settings.active_provider_id.trim().is_empty() {
         config.settings.active_provider_id = config
             .providers
             .first()
@@ -285,3 +281,34 @@ fn is_not_found(err: &anyhow::Error) -> bool {
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ProviderKind;
+
+    #[test]
+    fn repair_config_preserves_runtime_model_active_provider() {
+        let default_provider = StoredProvider {
+            id: "local-llama-swap".to_owned(),
+            name: "Local llama-swap".to_owned(),
+            kind: ProviderKind::OpenAiCompatible,
+            base_url: "http://rafael:8080/v1".to_owned(),
+            model: "gemma-everyday".to_owned(),
+            api_key: None,
+            system_prompt: None,
+        };
+        let config = ChatConfigFile {
+            providers: vec![default_provider.clone()],
+            settings: ChatSettings {
+                active_provider_id: "qwen3-coder".to_owned(),
+                theme: ThemeName::Charcoal,
+            },
+        };
+
+        let (repaired, changed) = repair_config(config, &default_provider);
+
+        assert!(!changed);
+        assert_eq!(repaired.settings.active_provider_id, "qwen3-coder");
+    }
+}
