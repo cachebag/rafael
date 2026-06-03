@@ -2,6 +2,7 @@
 /target/
 **/*.rs.bk
 Cargo.lock
+/data/
 
 # TypeScript
 node_modules/
@@ -9,6 +10,6 @@ dist/
 build/
 *.js.map
 *.d.ts
+!services/chat/web/src/vite-env.d.ts
 tsconfig.tsbuildinfo
 .tsbuildinfo
-

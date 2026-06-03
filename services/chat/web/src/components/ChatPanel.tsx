@@ -1,0 +1,274 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { PanelLeftClose, PanelLeftOpen, SendHorizontal } from "lucide-react";
+import {
+  compactModelName,
+  providerConnectionTitle
+} from "../display";
+import type { Conversation, PublicProvider } from "../types";
+
+interface ChatPanelProps {
+  conversation: Conversation | null;
+  activeProvider: PublicProvider | null;
+  busy: boolean;
+  error: string | null;
+  loading: "idle" | "loading" | "ready" | "failed";
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+  onSend: (content: string) => Promise<void>;
+}
+
+export function ChatPanel({
+  conversation,
+  activeProvider,
+  busy,
+  error,
+  loading,
+  sidebarCollapsed,
+  onToggleSidebar,
+  onSend
+}: ChatPanelProps) {
+  const [draft, setDraft] = useState("");
+  const [followStream, setFollowStream] = useState(true);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const wasBusyRef = useRef(false);
+  const canSend = draft.trim().length > 0 && !busy && activeProvider?.chatSupported === true;
+  const modelLabel =
+    activeProvider === null ? "No model selected" : compactModelName(activeProvider.model);
+  const streamPositionKey = useMemo(() => {
+    const lastMessage = conversation?.messages.at(-1);
+    return `${conversation?.id ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.content.length ?? 0}`;
+  }, [conversation?.id, conversation?.messages]);
+
+  useEffect(() => {
+    if (busy && !wasBusyRef.current) {
+      setFollowStream(true);
+    }
+    wasBusyRef.current = busy;
+  }, [busy]);
+
+  useEffect(() => {
+    if (!followStream && busy) {
+      return;
+    }
+    scrollToBottom(busy ? "auto" : "smooth");
+  }, [busy, followStream, streamPositionKey]);
+
+  async function submit(): Promise<void> {
+    const content = draft.trim();
+    if (content === "" || busy) {
+      return;
+    }
+    setDraft("");
+    await onSend(content);
+  }
+
+  function scrollToBottom(behavior: ScrollBehavior): void {
+    requestAnimationFrame(() => {
+      const scrollElement = scrollRef.current;
+      if (scrollElement === null) {
+        return;
+      }
+      if (behavior === "auto") {
+        scrollElement.scrollTop = scrollElement.scrollHeight;
+      } else {
+        scrollElement.scrollTo({
+          top: scrollElement.scrollHeight,
+          behavior
+        });
+      }
+    });
+  }
+
+  function interruptFollow(): void {
+    if (busy) {
+      setFollowStream(false);
+    }
+  }
+
+  function updateFollowFromScrollPosition(): void {
+    if (!busy) {
+      return;
+    }
+    const scrollElement = scrollRef.current;
+    if (scrollElement === null) {
+      return;
+    }
+    if (isAtBottom(scrollElement)) {
+      setFollowStream(true);
+    }
+  }
+
+  function useStarterPrompt(prompt: string): void {
+    if (busy || activeProvider?.chatSupported !== true) {
+      setDraft(prompt);
+      return;
+    }
+
+    void onSend(prompt);
+  }
+
+  return (
+    <section className="flex h-dvh min-h-0 flex-col overflow-hidden">
+      <header className="header-shell border-b border-[var(--line)] px-3 py-3 sm:px-5 sm:py-4">
+        <div className="flex items-center justify-between gap-3 sm:gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={sidebarCollapsed ? "Open sidebar" : "Collapse sidebar"}
+              title={sidebarCollapsed ? "Open sidebar" : "Collapse sidebar"}
+              onClick={onToggleSidebar}
+            >
+              {sidebarCollapsed ? (
+                <PanelLeftOpen aria-hidden="true" size={17} strokeWidth={2.1} />
+              ) : (
+                <PanelLeftClose aria-hidden="true" size={17} strokeWidth={2.1} />
+              )}
+            </button>
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-semibold">
+                {conversation?.title ?? "New conversation"}
+              </h2>
+              <p
+                className="mt-0.5 truncate text-xs text-[var(--muted)]"
+                title={providerConnectionTitle(activeProvider)}
+              >
+                {activeProvider === null ? modelLabel : `${activeProvider.name} · ${modelLabel}`}
+              </p>
+            </div>
+          </div>
+          {busy ? <span className="status-pill shrink-0">working</span> : null}
+        </div>
+      </header>
+
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scrollRef}
+          className="h-full overflow-y-auto px-3 py-4 sm:px-5 sm:py-7"
+          onScroll={updateFollowFromScrollPosition}
+          onWheel={interruptFollow}
+          onPointerDown={interruptFollow}
+          onTouchMove={interruptFollow}
+        >
+          {loading === "loading" ? (
+            <p className="text-sm text-[var(--muted)]">loading</p>
+          ) : conversation === null || conversation.messages.length === 0 ? (
+            <StartPanel
+              providerName={activeProvider?.name ?? "No provider configured"}
+              disabled={busy}
+              onSelectPrompt={useStarterPrompt}
+            />
+          ) : (
+            <div className="grid w-full gap-5">
+              {conversation.messages.map((message) => (
+                <article
+                  key={message.id}
+                  className={[
+                    "flex w-full",
+                    message.role === "user" ? "justify-end" : "justify-start"
+                  ].join(" ")}
+                >
+                  <div
+                    className={[
+                      "message-bubble whitespace-pre-wrap rounded-md border px-4 py-3 text-sm leading-6",
+                      message.role === "user"
+                        ? "message-bubble-user border-[var(--line)] bg-[var(--panel)] shadow-[var(--shadow-soft)]"
+                        : "message-bubble-model border-transparent bg-[var(--assistant-bg)]"
+                    ].join(" ")}
+                  >
+                    {message.content}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <footer className="composer-shell border-t border-[var(--line)] p-3 sm:p-5">
+        <div className="grid gap-3">
+          {error !== null ? (
+            <div className="rounded-md border border-[var(--danger)] bg-[var(--danger-bg)] px-3 py-2 text-sm text-[var(--danger-text)]">
+              {error}
+            </div>
+          ) : null}
+          <div className="rounded-md border border-[var(--line)] bg-[var(--panel)] p-2 shadow-[var(--shadow-soft)]">
+            <textarea
+              className="composer-input max-h-28 min-h-12 w-full resize-none rounded border-0 bg-transparent px-2 py-2 text-base leading-6 text-[var(--text)] outline-none sm:text-sm"
+              rows={2}
+              placeholder={`Message ${activeProvider?.name ?? "rafael"}...`}
+              value={draft}
+              disabled={busy}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void submit();
+                }
+              }}
+            />
+            <div className="flex items-center justify-between gap-3 border-t border-[var(--line)] px-2 pt-2">
+              <span className="truncate text-xs text-[var(--muted)]" title={activeProvider?.model}>
+                {activeProvider?.chatSupported === false
+                  ? "Adapter pending."
+                  : modelLabel}
+              </span>
+              <button
+                type="button"
+                className="button-primary inline-flex shrink-0 items-center gap-1.5"
+                disabled={!canSend}
+                onClick={() => void submit()}
+              >
+                <SendHorizontal aria-hidden="true" size={15} strokeWidth={2.2} />
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      </footer>
+    </section>
+  );
+}
+
+interface StartPanelProps {
+  providerName: string;
+  disabled: boolean;
+  onSelectPrompt: (prompt: string) => void;
+}
+
+function StartPanel({ providerName, disabled, onSelectPrompt }: StartPanelProps) {
+  return (
+    <div className="flex min-h-full items-center justify-center">
+      <div className="start-panel w-full max-w-3xl rounded-md border border-[var(--line)] bg-[var(--panel)] p-5 shadow-[var(--shadow-soft)]">
+        <div className="flex flex-col gap-1 border-b border-[var(--line)] pb-4">
+          <p className="text-base font-semibold text-[var(--text)]">Start a thread</p>
+          <p className="text-sm text-[var(--muted)]">{providerName}</p>
+        </div>
+        <div className="grid gap-2 pt-4 sm:grid-cols-2">
+          {starterPrompts.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              className="starter-prompt"
+              disabled={disabled}
+              onClick={() => onSelectPrompt(prompt)}
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const starterPrompts = [
+  "Help me think through a homelab task",
+  "Draft a concise note",
+  "Explain a command or error",
+  "Sketch a small implementation plan"
+];
+
+function isAtBottom(element: HTMLElement): boolean {
+  return Math.ceil(element.scrollTop + element.clientHeight) >= element.scrollHeight;
+}

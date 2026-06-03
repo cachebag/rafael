@@ -1,6 +1,9 @@
 use std::time::Duration;
 
+use common::SecretString;
+use futures_util::StreamExt;
 use reqwest::Client;
+use reqwest::header::AUTHORIZATION;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
@@ -16,6 +19,8 @@ pub enum ClientError {
     NoJson,
     #[error("failed to parse json model output: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("model stream returned invalid utf8: {0}")]
+    Utf8(#[from] std::str::Utf8Error),
 }
 
 #[derive(Debug, Clone)]
@@ -23,6 +28,7 @@ pub struct ModelClientConfig {
     pub base_url: String,
     pub model: String,
     pub timeout: Option<Duration>,
+    pub authorization: Option<AuthorizationHeader>,
 }
 
 impl ModelClientConfig {
@@ -31,12 +37,46 @@ impl ModelClientConfig {
             base_url: base_url.into(),
             model: model.into(),
             timeout: None,
+            authorization: None,
         }
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
+    }
+
+    pub fn with_bearer_token(mut self, token: impl Into<String>) -> Self {
+        self.authorization = Some(AuthorizationHeader::bearer(token));
+        self
+    }
+
+    pub fn with_authorization(mut self, authorization: AuthorizationHeader) -> Self {
+        self.authorization = Some(authorization);
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorizationHeader {
+    value: SecretString,
+}
+
+impl AuthorizationHeader {
+    pub fn bearer(token: impl Into<String>) -> Self {
+        Self {
+            value: SecretString::new(format!("Bearer {}", token.into())),
+        }
+    }
+
+    pub fn raw(value: impl Into<String>) -> Self {
+        Self {
+            value: SecretString::new(value),
+        }
+    }
+
+    pub fn expose_value(&self) -> &str {
+        self.value.expose_secret()
     }
 }
 
@@ -45,6 +85,7 @@ pub struct LocalModelClient {
     http: Client,
     base_url: String,
     model: String,
+    authorization: Option<AuthorizationHeader>,
 }
 
 impl LocalModelClient {
@@ -58,6 +99,7 @@ impl LocalModelClient {
             http: builder.build().map_err(ClientError::BuildHttp)?,
             base_url: config.base_url.trim_end_matches('/').to_owned(),
             model: config.model,
+            authorization: config.authorization,
         })
     }
 
@@ -66,11 +108,12 @@ impl LocalModelClient {
             http,
             base_url: config.base_url.trim_end_matches('/').to_owned(),
             model: config.model,
+            authorization: config.authorization,
         }
     }
 
     pub async fn chat(&self, request: ChatRequest) -> Result<ChatCompletion, ClientError> {
-        let response = self
+        let mut http_request = self
             .http
             .post(format!("{}/chat/completions", self.base_url))
             .json(&ChatCompletionsRequestBody {
@@ -80,7 +123,13 @@ impl LocalModelClient {
                 max_tokens: request.options.max_tokens,
                 stream: false,
                 response_format: request.options.response_format,
-            })
+            });
+
+        if let Some(authorization) = &self.authorization {
+            http_request = http_request.header(AUTHORIZATION, authorization.expose_value());
+        }
+
+        let response = http_request
             .send()
             .await
             .map_err(ClientError::Http)?
@@ -99,6 +148,90 @@ impl LocalModelClient {
             content: choice.message.content,
             finish_reason: choice.finish_reason,
             usage: response.usage,
+        })
+    }
+
+    pub async fn chat_stream<F>(
+        &self,
+        request: ChatRequest,
+        mut on_delta: F,
+    ) -> Result<ChatCompletion, ClientError>
+    where
+        F: FnMut(&str),
+    {
+        let mut http_request = self
+            .http
+            .post(format!("{}/chat/completions", self.base_url))
+            .json(&ChatCompletionsRequestBody {
+                model: &self.model,
+                messages: &request.messages,
+                temperature: request.options.temperature,
+                max_tokens: request.options.max_tokens,
+                stream: true,
+                response_format: request.options.response_format,
+            });
+
+        if let Some(authorization) = &self.authorization {
+            http_request = http_request.header(AUTHORIZATION, authorization.expose_value());
+        }
+
+        let mut stream = http_request
+            .send()
+            .await
+            .map_err(ClientError::Http)?
+            .error_for_status()
+            .map_err(ClientError::Http)?
+            .bytes_stream();
+
+        let mut buffer = String::new();
+        let mut content = String::new();
+        let mut finish_reason = None;
+        let mut usage = None;
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(ClientError::Http)?;
+            buffer.push_str(std::str::from_utf8(&chunk)?);
+
+            while let Some(line_end) = buffer.find('\n') {
+                let line = buffer[..line_end].trim_end_matches('\r').to_owned();
+                buffer.drain(..=line_end);
+
+                let Some(data) = line.strip_prefix("data:") else {
+                    continue;
+                };
+                let data = data.trim();
+                if data.is_empty() {
+                    continue;
+                }
+                if data == "[DONE]" {
+                    return Ok(ChatCompletion {
+                        content,
+                        finish_reason,
+                        usage,
+                    });
+                }
+
+                let chunk = serde_json::from_str::<ChatCompletionsStreamResponse>(data)?;
+                if let Some(next_usage) = chunk.usage {
+                    usage = Some(next_usage);
+                }
+
+                for choice in chunk.choices {
+                    if let Some(next_finish_reason) = choice.finish_reason {
+                        finish_reason = Some(next_finish_reason);
+                    }
+                    if let Some(delta) = choice.delta.content {
+                        content.push_str(&delta);
+                        on_delta(&delta);
+                    }
+                }
+            }
+        }
+
+        Ok(ChatCompletion {
+            content,
+            finish_reason,
+            usage,
         })
     }
 
@@ -333,6 +466,23 @@ struct ChatChoiceMessage {
     content: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ChatCompletionsStreamResponse {
+    choices: Vec<ChatStreamChoice>,
+    usage: Option<Usage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatStreamChoice {
+    delta: ChatStreamDelta,
+    finish_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatStreamDelta {
+    content: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,5 +509,16 @@ mod tests {
     fn parses_json_output() {
         let value: serde_json::Value = parse_json_output("```json\n{\"ok\":true}\n```").unwrap();
         assert_eq!(value["ok"], true);
+    }
+
+    #[test]
+    fn bearer_authorization_is_redacted_in_debug() {
+        let authorization = AuthorizationHeader::bearer("secret-token");
+
+        assert_eq!(authorization.expose_value(), "Bearer secret-token");
+        assert_eq!(
+            format!("{authorization:?}"),
+            "AuthorizationHeader { value: SecretString(<redacted>) }"
+        );
     }
 }
