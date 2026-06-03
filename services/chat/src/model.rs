@@ -45,7 +45,10 @@ async fn openai_compatible_chat(
     let client = LocalModelClient::new(model_client_config(provider, timeout))
         .context("failed to create model client")?;
     let response = client
-        .chat(ChatRequest::new(model_messages(provider, messages)).with_options(ChatOptions::default()))
+        .chat(
+            ChatRequest::new(model_messages(provider, messages))
+                .with_options(ChatOptions::default()),
+        )
         .await
         .context("model endpoint returned an error")?;
 
@@ -64,7 +67,10 @@ where
     let client = LocalModelClient::new(model_client_config(provider, timeout))
         .context("failed to create model client")?;
     let response = client
-        .chat_stream(ChatRequest::new(model_messages(provider, messages)), on_delta)
+        .chat_stream(
+            ChatRequest::new(model_messages(provider, messages)),
+            on_delta,
+        )
         .await
         .context("model endpoint returned an error")?;
 

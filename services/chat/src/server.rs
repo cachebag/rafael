@@ -67,10 +67,7 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
                 .delete(delete_conversation),
         )
         .route("/conversations/{id}/messages", post(send_message))
-        .route(
-            "/conversations/{id}/messages/stream",
-            post(stream_message),
-        )
+        .route("/conversations/{id}/messages/stream", post(stream_message))
         .with_state(state);
 
     let static_files = ServeDir::new(config.web_dist.clone())

@@ -5,6 +5,7 @@ import {
   providerConnectionTitle
 } from "../display";
 import type { Conversation, PublicProvider } from "../types";
+import { MarkdownContent } from "./MarkdownContent";
 
 interface ChatPanelProps {
   conversation: Conversation | null;
@@ -170,13 +171,17 @@ export function ChatPanel({
                 >
                   <div
                     className={[
-                      "message-bubble whitespace-pre-wrap rounded-md border px-4 py-3 text-sm leading-6",
+                      "message-bubble rounded-md border px-4 py-3 text-sm leading-6",
                       message.role === "user"
-                        ? "message-bubble-user border-[var(--line)] bg-[var(--panel)] shadow-[var(--shadow-soft)]"
+                        ? "message-bubble-user whitespace-pre-wrap border-[var(--line)] bg-[var(--panel)] shadow-[var(--shadow-soft)]"
                         : "message-bubble-model border-transparent bg-[var(--assistant-bg)]"
                     ].join(" ")}
                   >
-                    {message.content}
+                    {message.role === "user" ? (
+                      message.content
+                    ) : (
+                      <MarkdownContent content={message.content} />
+                    )}
                   </div>
                 </article>
               ))}
