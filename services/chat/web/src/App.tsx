@@ -16,7 +16,6 @@ import type {
   ChatMessageRecord,
   ChatState,
   Conversation,
-  PublicProvider,
   ThemeName
 } from "./types";
 
@@ -297,17 +296,6 @@ export default function App() {
     }
   }
 
-  async function handleProvidersChanged(provider?: PublicProvider): Promise<void> {
-    const nextState = await refreshState();
-    if (provider !== undefined && provider.chatSupported) {
-      const updatedState = await updateSettings({ activeProviderId: provider.id });
-      setState(updatedState);
-      applyTheme(updatedState.theme);
-      return;
-    }
-    setState(nextState);
-  }
-
   return (
     <main className="app-shell min-h-dvh text-[var(--text)]">
       <div
@@ -368,7 +356,6 @@ export default function App() {
           activeProviderId={state.activeProviderId}
           theme={state.theme}
           onClose={() => setSettingsOpen(false)}
-          onSaved={handleProvidersChanged}
           onProviderChange={handleProviderChange}
           onThemeChange={handleThemeChange}
         />

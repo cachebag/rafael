@@ -1,7 +1,6 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { ReactNode, SelectHTMLAttributes } from "react";
 import { ChevronDown, Moon, Sun, X } from "lucide-react";
-import { saveProvider } from "../api";
 import { compactModelName } from "../display";
 import {
   composeTheme,
@@ -11,89 +10,31 @@ import {
   toggledTheme,
   type ThemeBaseName
 } from "../themes";
-import type {
-  ProviderKind,
-  PublicProvider,
-  SaveProviderRequest,
-  ThemeName
-} from "../types";
+import type { PublicProvider, ThemeName } from "../types";
 
 interface SettingsPanelProps {
   providers: PublicProvider[];
   activeProviderId: string;
   theme: ThemeName;
   onClose: () => void;
-  onSaved: (provider?: PublicProvider) => Promise<void>;
   onProviderChange: (id: string) => Promise<void>;
   onThemeChange: (theme: ThemeName) => Promise<void>;
 }
-
-interface ProviderFormState {
-  id?: string;
-  name: string;
-  kind: ProviderKind;
-  baseUrl: string;
-  model: string;
-  apiKey: string;
-  systemPrompt: string;
-}
-
-const emptyProvider: ProviderFormState = {
-  name: "",
-  kind: "open_ai_compatible",
-  baseUrl: "",
-  model: "",
-  apiKey: "",
-  systemPrompt: ""
-};
 
 export function SettingsPanel({
   providers,
   activeProviderId,
   theme,
   onClose,
-  onSaved,
   onProviderChange,
   onThemeChange
 }: SettingsPanelProps) {
   const activeProvider =
     providers.find((provider) => provider.id === activeProviderId) ?? providers[0];
-  const [editingId, setEditingId] = useState<string>(activeProvider?.id ?? "new");
-  const [form, setForm] = useState<ProviderFormState>(() =>
-    activeProvider === undefined ? emptyProvider : providerToForm(activeProvider)
-  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const selectedProvider = useMemo(
-    () => providers.find((provider) => provider.id === editingId),
-    [editingId, providers]
-  );
   const mode = themeMode(theme);
   const switchToMode = mode === "dark" ? "light" : "dark";
-
-  function chooseProvider(id: string): void {
-    setEditingId(id);
-    const provider = providers.find((item) => item.id === id);
-    setForm(provider === undefined ? emptyProvider : providerToForm(provider));
-    setError(null);
-  }
-
-  async function submit(): Promise<void> {
-    setSaving(true);
-    setError(null);
-    try {
-      const request = formToRequest(form, selectedProvider);
-      const provider = await saveProvider(request);
-      await onSaved(provider);
-      setEditingId(provider.id);
-      setForm(providerToForm(provider));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "failed to save provider");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function updateActiveProvider(providerId: string): Promise<void> {
     setSaving(true);
@@ -199,73 +140,17 @@ export function SettingsPanel({
           </section>
 
           <section className="settings-section">
-            <div className="settings-section-heading">
-              <h3 className="settings-section-title">Provider</h3>
-              <SelectControl
-                id="provider-edit"
-                className="settings-provider-select"
-                value={editingId}
-                onChange={(event) => chooseProvider(event.target.value)}
-              >
-                {providers.map((provider) => (
-                  <option key={provider.id} value={provider.id}>
-                    {provider.name}
-                  </option>
-                ))}
-                <option value="new">New provider</option>
-              </SelectControl>
-            </div>
-
-            <div className="settings-grid settings-grid-two">
-              <Field label="Name">
-                <input
-                  className="control"
-                  value={form.name}
-                  onChange={(event) => setForm({ ...form, name: event.target.value })}
-                />
-              </Field>
-              <Field label="Type">
-                <SelectControl
-                  value={form.kind}
-                  onChange={(event) =>
-                    setForm({ ...form, kind: event.target.value as ProviderKind })
-                  }
-                >
-                  <option value="open_ai_compatible">OpenAI compatible</option>
-                  <option value="anthropic">Anthropic</option>
-                </SelectControl>
-              </Field>
-              <Field label="Base URL">
-                <input
-                  className="control"
-                  value={form.baseUrl}
-                  onChange={(event) => setForm({ ...form, baseUrl: event.target.value })}
-                />
-              </Field>
-              <Field label="Model">
-                <input
-                  className="control"
-                  value={form.model}
-                  onChange={(event) => setForm({ ...form, model: event.target.value })}
-                />
-              </Field>
-              <Field label="API key">
-                <input
-                  className="control"
-                  type="password"
-                  value={form.apiKey}
-                  placeholder={selectedProvider?.hasApiKey ? "stored" : ""}
-                  onChange={(event) => setForm({ ...form, apiKey: event.target.value })}
-                />
-              </Field>
-              <Field label="System" className="settings-field-wide">
-                <textarea
-                  className="control min-h-24 resize-y"
-                  value={form.systemPrompt}
-                  onChange={(event) => setForm({ ...form, systemPrompt: event.target.value })}
-                />
-              </Field>
-            </div>
+            <h3 className="settings-section-title">Model details</h3>
+            {activeProvider !== undefined ? (
+              <div className="settings-grid settings-grid-two">
+                <Detail label="Name" value={activeProvider.name} />
+                <Detail label="Type" value={providerKindLabel(activeProvider)} />
+                <Detail label="Endpoint" value={activeProvider.baseUrl} />
+                <Detail label="Model ID" value={activeProvider.model} />
+              </div>
+            ) : (
+              <p className="text-sm text-[var(--muted)]">No model selected.</p>
+            )}
           </section>
 
           {error !== null ? (
@@ -274,17 +159,6 @@ export function SettingsPanel({
             </div>
           ) : null}
         </div>
-
-        <footer className="settings-footer">
-          <button
-            type="button"
-            className="button-primary"
-            disabled={saving}
-            onClick={() => void submit()}
-          >
-            Save provider
-          </button>
-        </footer>
       </section>
     </div>
   );
@@ -327,30 +201,20 @@ function Field({
   );
 }
 
-function providerToForm(provider: PublicProvider): ProviderFormState {
-  return {
-    id: provider.id,
-    name: provider.name,
-    kind: provider.kind,
-    baseUrl: provider.baseUrl,
-    model: provider.model,
-    apiKey: "",
-    systemPrompt: provider.systemPrompt ?? ""
-  };
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="settings-detail">
+      <span className="control-label">{label}</span>
+      <span className="settings-detail-value" title={value}>
+        {value}
+      </span>
+    </div>
+  );
 }
 
-function formToRequest(
-  form: ProviderFormState,
-  selectedProvider: PublicProvider | undefined
-): SaveProviderRequest {
-  const apiKey = form.apiKey.trim();
-  return {
-    id: selectedProvider === undefined ? undefined : form.id,
-    name: form.name,
-    kind: form.kind,
-    baseUrl: form.baseUrl,
-    model: form.model,
-    apiKey: apiKey === "" ? undefined : apiKey,
-    systemPrompt: form.systemPrompt.trim() === "" ? undefined : form.systemPrompt
-  };
+function providerKindLabel(provider: PublicProvider): string {
+  if (provider.kind === "open_ai_compatible") {
+    return "OpenAI compatible";
+  }
+  return "Anthropic";
 }

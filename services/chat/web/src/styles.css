@@ -404,8 +404,7 @@ input:disabled {
   box-shadow: var(--shadow-soft);
 }
 
-.settings-header,
-.settings-footer {
+.settings-header {
   flex: 0 0 auto;
   background: color-mix(in srgb, var(--panel) 92%, var(--bg) 8%);
 }
@@ -454,15 +453,22 @@ input:disabled {
   gap: 0.85rem;
 }
 
-.settings-provider-select {
-  width: 100%;
+.settings-detail {
+  display: grid;
+  min-width: 0;
+  gap: 0.35rem;
 }
 
-.settings-footer {
-  display: flex;
-  justify-content: flex-end;
-  border-top: 1px solid var(--line);
-  padding: 0.85rem 1rem;
+.settings-detail-value {
+  min-height: 2.5rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--input) 52%, transparent);
+  color: var(--text);
+  padding: 0.625rem 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .copy-button {
