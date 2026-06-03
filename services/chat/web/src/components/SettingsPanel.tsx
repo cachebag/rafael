@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import type { ReactNode } from "react";
-import { Moon, Sun } from "lucide-react";
+import type { ReactNode, SelectHTMLAttributes } from "react";
+import { ChevronDown, Moon, Sun, X } from "lucide-react";
 import { saveProvider } from "../api";
 import { compactModelName } from "../display";
 import {
@@ -120,150 +120,162 @@ export function SettingsPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 p-0 sm:p-4">
-      <div className="mx-auto grid h-dvh max-h-dvh w-full max-w-xl gap-4 overflow-y-auto border border-[var(--line)] bg-[var(--panel)] p-4 shadow-xl sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-md">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-base font-semibold">Settings</h2>
-          <button type="button" className="button-secondary" onClick={onClose}>
-            Close
+    <div className="settings-overlay">
+      <section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <header className="settings-header">
+          <div className="min-w-0">
+            <h2 id="settings-title" className="text-base font-semibold">
+              Settings
+            </h2>
+            {activeProvider !== undefined ? (
+              <p className="mt-1 truncate text-xs text-[var(--muted)]" title={activeProvider.model}>
+                {activeProvider.name} · {compactModelName(activeProvider.model)}
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="icon-button icon-button-subtle"
+            aria-label="Close settings"
+            title="Close settings"
+            onClick={onClose}
+          >
+            <X aria-hidden="true" size={17} strokeWidth={2.1} />
           </button>
-        </div>
+        </header>
 
-        <div className="grid gap-3 rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-3">
-          <Field label="Active model">
-            <select
-              className="control"
-              value={activeProviderId}
-              disabled={saving || providers.length === 0}
-              onChange={(event) => void updateActiveProvider(event.target.value)}
-            >
-              {providers.length === 0 ? <option value="">No providers</option> : null}
-              {providers.map((provider) => (
-                <option key={provider.id} value={provider.id} disabled={!provider.chatSupported}>
-                  {provider.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {activeProvider !== undefined ? (
-            <p className="truncate text-xs text-[var(--muted)]" title={activeProvider.model}>
-              {compactModelName(activeProvider.model)}
-            </p>
-          ) : null}
-          <Field label="Theme">
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-              <select
-                className="control"
-                value={themeBase(theme)}
-                disabled={saving}
-                onChange={(event) =>
-                  void updateTheme(
-                    composeTheme(event.target.value as ThemeBaseName, mode)
-                  )
-                }
+        <div className="settings-body">
+          <section className="settings-section">
+            <h3 className="settings-section-title">Chat</h3>
+            <div className="settings-grid settings-grid-two">
+              <Field label="Active model">
+                <SelectControl
+                  value={activeProviderId}
+                  disabled={saving || providers.length === 0}
+                  onChange={(event) => void updateActiveProvider(event.target.value)}
+                >
+                  {providers.length === 0 ? <option value="">No providers</option> : null}
+                  {providers.map((provider) => (
+                    <option key={provider.id} value={provider.id} disabled={!provider.chatSupported}>
+                      {provider.name}
+                    </option>
+                  ))}
+                </SelectControl>
+              </Field>
+              <Field label="Theme">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                  <SelectControl
+                    value={themeBase(theme)}
+                    disabled={saving}
+                    onChange={(event) =>
+                      void updateTheme(
+                        composeTheme(event.target.value as ThemeBaseName, mode)
+                      )
+                    }
+                  >
+                    {themes.map((themeOption) => (
+                      <option key={themeOption.value} value={themeOption.value}>
+                        {themeOption.label}
+                      </option>
+                    ))}
+                  </SelectControl>
+                  <button
+                    type="button"
+                    className="theme-mode-button"
+                    disabled={saving}
+                    title={`Switch to ${switchToMode} mode`}
+                    onClick={() => void updateTheme(toggledTheme(theme))}
+                  >
+                    {switchToMode === "light" ? (
+                      <Sun aria-hidden="true" size={15} strokeWidth={2.1} />
+                    ) : (
+                      <Moon aria-hidden="true" size={15} strokeWidth={2.1} />
+                    )}
+                    {switchToMode === "light" ? "Light" : "Dark"}
+                  </button>
+                </div>
+              </Field>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <div className="settings-section-heading">
+              <h3 className="settings-section-title">Provider</h3>
+              <SelectControl
+                id="provider-edit"
+                className="settings-provider-select"
+                value={editingId}
+                onChange={(event) => chooseProvider(event.target.value)}
               >
-                {themes.map((themeOption) => (
-                  <option key={themeOption.value} value={themeOption.value}>
-                    {themeOption.label}
+                {providers.map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.name}
                   </option>
                 ))}
-              </select>
-              <button
-                type="button"
-                className="theme-mode-button"
-                disabled={saving}
-                title={`Switch to ${switchToMode} mode`}
-                onClick={() => void updateTheme(toggledTheme(theme))}
-              >
-                {switchToMode === "light" ? (
-                  <Sun aria-hidden="true" size={15} strokeWidth={2.1} />
-                ) : (
-                  <Moon aria-hidden="true" size={15} strokeWidth={2.1} />
-                )}
-                {switchToMode === "light" ? "Light" : "Dark"}
-              </button>
+                <option value="new">New provider</option>
+              </SelectControl>
             </div>
-          </Field>
+
+            <div className="settings-grid settings-grid-two">
+              <Field label="Name">
+                <input
+                  className="control"
+                  value={form.name}
+                  onChange={(event) => setForm({ ...form, name: event.target.value })}
+                />
+              </Field>
+              <Field label="Type">
+                <SelectControl
+                  value={form.kind}
+                  onChange={(event) =>
+                    setForm({ ...form, kind: event.target.value as ProviderKind })
+                  }
+                >
+                  <option value="open_ai_compatible">OpenAI compatible</option>
+                  <option value="anthropic">Anthropic</option>
+                </SelectControl>
+              </Field>
+              <Field label="Base URL">
+                <input
+                  className="control"
+                  value={form.baseUrl}
+                  onChange={(event) => setForm({ ...form, baseUrl: event.target.value })}
+                />
+              </Field>
+              <Field label="Model">
+                <input
+                  className="control"
+                  value={form.model}
+                  onChange={(event) => setForm({ ...form, model: event.target.value })}
+                />
+              </Field>
+              <Field label="API key">
+                <input
+                  className="control"
+                  type="password"
+                  value={form.apiKey}
+                  placeholder={selectedProvider?.hasApiKey ? "stored" : ""}
+                  onChange={(event) => setForm({ ...form, apiKey: event.target.value })}
+                />
+              </Field>
+              <Field label="System" className="settings-field-wide">
+                <textarea
+                  className="control min-h-24 resize-y"
+                  value={form.systemPrompt}
+                  onChange={(event) => setForm({ ...form, systemPrompt: event.target.value })}
+                />
+              </Field>
+            </div>
+          </section>
+
+          {error !== null ? (
+            <div className="rounded-md border border-[var(--danger)] bg-[var(--danger-bg)] px-3 py-2 text-sm text-[var(--danger-text)]">
+              {error}
+            </div>
+          ) : null}
         </div>
 
-        <div className="grid gap-2">
-          <label className="control-label" htmlFor="provider-edit">
-            Provider
-          </label>
-          <select
-            id="provider-edit"
-            className="control"
-            value={editingId}
-            onChange={(event) => chooseProvider(event.target.value)}
-          >
-            {providers.map((provider) => (
-              <option key={provider.id} value={provider.id}>
-                {provider.name}
-              </option>
-            ))}
-            <option value="new">New provider</option>
-          </select>
-        </div>
-
-        <div className="grid gap-3">
-          <Field label="Name">
-            <input
-              className="control"
-              value={form.name}
-              onChange={(event) => setForm({ ...form, name: event.target.value })}
-            />
-          </Field>
-          <Field label="Type">
-            <select
-              className="control"
-              value={form.kind}
-              onChange={(event) =>
-                setForm({ ...form, kind: event.target.value as ProviderKind })
-              }
-            >
-              <option value="open_ai_compatible">OpenAI compatible</option>
-              <option value="anthropic">Anthropic</option>
-            </select>
-          </Field>
-          <Field label="Base URL">
-            <input
-              className="control"
-              value={form.baseUrl}
-              onChange={(event) => setForm({ ...form, baseUrl: event.target.value })}
-            />
-          </Field>
-          <Field label="Model">
-            <input
-              className="control"
-              value={form.model}
-              onChange={(event) => setForm({ ...form, model: event.target.value })}
-            />
-          </Field>
-          <Field label="API key">
-            <input
-              className="control"
-              type="password"
-              value={form.apiKey}
-              placeholder={selectedProvider?.hasApiKey ? "stored" : ""}
-              onChange={(event) => setForm({ ...form, apiKey: event.target.value })}
-            />
-          </Field>
-          <Field label="System">
-            <textarea
-              className="control min-h-20 resize-y"
-              value={form.systemPrompt}
-              onChange={(event) => setForm({ ...form, systemPrompt: event.target.value })}
-            />
-          </Field>
-        </div>
-
-        {error !== null ? (
-          <div className="rounded-md border border-[var(--danger)] px-3 py-2 text-sm text-[var(--danger-text)]">
-            {error}
-          </div>
-        ) : null}
-
-        <div className="flex justify-end">
+        <footer className="settings-footer">
           <button
             type="button"
             className="button-primary"
@@ -272,21 +284,43 @@ export function SettingsPanel({
           >
             Save provider
           </button>
-        </div>
-      </div>
+        </footer>
+      </section>
     </div>
+  );
+}
+
+function SelectControl({
+  children,
+  className,
+  ...props
+}: SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <span className={["select-shell", className ?? ""].join(" ")}>
+      <select className="control select-control" {...props}>
+        {children}
+      </select>
+      <ChevronDown
+        aria-hidden="true"
+        className="select-chevron"
+        size={16}
+        strokeWidth={2.1}
+      />
+    </span>
   );
 }
 
 function Field({
   label,
-  children
+  children,
+  className
 }: {
   label: string;
   children: ReactNode;
+  className?: string;
 }) {
   return (
-    <label className="grid gap-2">
+    <label className={["grid gap-2", className ?? ""].join(" ")}>
       <span className="control-label">{label}</span>
       {children}
     </label>
