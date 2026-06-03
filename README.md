@@ -17,8 +17,10 @@ infra/systemd/   systemd service definitions
 The active pieces right now are:
 
 - `services/coding`: the GitHub App coding worker.
+- `services/chat`: the local model chat interface.
 - `infra/systemd/llama-server.service`: the user systemd service for the local
   `llama.cpp` server.
+- `infra/systemd/rafael-chat.service`: the user systemd service for the chat UI.
 
 ## Local Model
 
@@ -45,8 +47,9 @@ infra/systemd/llama-server.service
 More details:
 
 - [infra/systemd/README.md](infra/systemd/README.md)
+- [services/chat/README.md](services/chat/README.md)
 - [services/coding/README.md](services/coding/README.md)
-- 
+
 ## License
 
 MIT
