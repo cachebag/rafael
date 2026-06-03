@@ -5,7 +5,7 @@ import {
   providerConnectionTitle
 } from "../display";
 import type { Conversation, PublicProvider } from "../types";
-import { MarkdownContent } from "./MarkdownContent";
+import { MessageThread } from "./MessageThread";
 
 interface ChatPanelProps {
   conversation: Conversation | null;
@@ -160,32 +160,7 @@ export function ChatPanel({
               onSelectPrompt={useStarterPrompt}
             />
           ) : (
-            <div className="grid w-full gap-5">
-              {conversation.messages.map((message) => (
-                <article
-                  key={message.id}
-                  className={[
-                    "flex w-full",
-                    message.role === "user" ? "justify-end" : "justify-start"
-                  ].join(" ")}
-                >
-                  <div
-                    className={[
-                      "message-bubble rounded-md border px-4 py-3 text-sm leading-6",
-                      message.role === "user"
-                        ? "message-bubble-user whitespace-pre-wrap border-[var(--line)] bg-[var(--panel)] shadow-[var(--shadow-soft)]"
-                        : "message-bubble-model border-transparent bg-[var(--assistant-bg)]"
-                    ].join(" ")}
-                  >
-                    {message.role === "user" ? (
-                      message.content
-                    ) : (
-                      <MarkdownContent content={message.content} />
-                    )}
-                  </div>
-                </article>
-              ))}
-            </div>
+            <MessageThread messages={conversation.messages} busy={busy} />
           )}
         </div>
       </div>
