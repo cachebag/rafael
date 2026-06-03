@@ -18,18 +18,23 @@ The active pieces right now are:
 
 - `services/coding`: the GitHub App coding worker.
 - `services/chat`: the local model chat interface.
-- `infra/systemd/llama-server.service`: the user systemd service for the local
-  `llama.cpp` server.
+- `infra/systemd/llama-swap.service`: the user systemd service for the local
+  model lifecycle proxy.
 - `infra/systemd/rafael-chat.service`: the user systemd service for the chat UI.
 
 ## Local Model
 
-The primary local model is currently served via `llama.cpp`.
+Local models are served through `llama-swap`, which lazily starts
+`llama-server` processes from `infra/systemd/llama-swap.yaml`.
 
-Model:
+Model IDs:
 
 ```txt
-Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M
+gemma-everyday
+qwen3-coder
+gpt-oss
+qwen-coder-fim
+gemma-deep
 ```
 
 Endpoint:
@@ -41,7 +46,7 @@ http://rafael:8080/v1
 The systemd service definition is located at:
 
 ```txt
-infra/systemd/llama-server.service
+infra/systemd/llama-swap.service
 ```
 
 More details:

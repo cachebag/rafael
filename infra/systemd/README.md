@@ -6,98 +6,125 @@ The intended machine setup is:
 
 - `llama.cpp` is checked out and built at `~/src/llama.cpp`.
 - The server binary exists at `~/src/llama.cpp/build/bin/llama-server`.
+- `llama-swap` is installed at `~/.local/bin/llama-swap`.
 - CUDA is available under `/opt/cuda`.
-- The model endpoint is reachable at `http://rafael:8080/v1`.
+- The local OpenAI-compatible endpoint is reachable at `http://rafael:8080/v1`.
 
-## llama-server.service
+## llama-swap.service
 
-The checked-in unit defaults to:
+`llama-swap.service` is the primary local model service. It owns the public API
+port `8080` and launches private per-model `llama-server` processes from
+`llama-swap.yaml`.
 
-```ini
-LLAMA_MODEL=Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M
-LLAMA_HOST=0.0.0.0
-LLAMA_PORT=8080
-LLAMA_CTX=16384
-LLAMA_GPU_LAYERS=999
-LLAMA_INSTALL_DIR=%h/src/llama.cpp
-```
-
-`services/coding` uses the same default model settings:
+The checked-in config defines these model IDs:
 
 ```txt
-RAFAEL_MODEL_BASE_URL=http://rafael:8080/v1
-RAFAEL_MODEL_NAME=Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M
+gemma-everyday
+qwen3-coder
+gpt-oss
+qwen-coder-fim
+gemma-deep
 ```
+
+All five are members of the `local-models` group:
+
+```yaml
+groups:
+  local-models:
+    swap: true
+    exclusive: true
+```
+
+That means only one model in the group can be resident at once. A request for a
+different model unloads the current model before the next one starts. The config
+also sets `globalTTL: 600`, so an idle model unloads after 10 minutes.
+
+`gemma-everyday` uses `ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M`.
+`gemma-deep` uses `ggml-org/gemma-4-26B-A4B-it-GGUF:Q4_K_M`.
 
 ## Install or Update
 
-Install the unit into the user systemd directory:
+Install or build `llama-swap`, then place the binary at:
+
+```bash
+mkdir -p ~/.local/bin
+# install/copy llama-swap to ~/.local/bin/llama-swap
+chmod +x ~/.local/bin/llama-swap
+```
+
+Install the units into the user systemd directory:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp infra/systemd/llama-server.service ~/.config/systemd/user/llama-server.service
+ln -sf ~/rafael/infra/systemd/llama-swap.service ~/.config/systemd/user/llama-swap.service
+ln -sf ~/rafael/infra/systemd/rafael-chat.service ~/.config/systemd/user/rafael-chat.service
 systemctl --user daemon-reload
-systemctl --user enable --now llama-server
 ```
 
-After changing the checked-in unit, copy it again and restart:
+Stop the legacy direct server before enabling the proxy:
 
 ```bash
-cp infra/systemd/llama-server.service ~/.config/systemd/user/llama-server.service
-systemctl --user daemon-reload
-systemctl --user restart llama-server
+systemctl --user disable --now llama-server.service
+systemctl --user enable --now llama-swap.service
+systemctl --user restart rafael-chat.service
 ```
 
-## Local Overrides
-
-Keep machine-specific tweaks out of the tracked unit by using a systemd drop-in:
+After changing `llama-swap.yaml`, restart the proxy:
 
 ```bash
-systemctl --user edit llama-server
+systemctl --user restart llama-swap.service
 ```
 
-Example override:
-
-```ini
-[Service]
-Environment=LLAMA_MODEL=bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M
-Environment=LLAMA_HOST=127.0.0.1
-Environment=LLAMA_PORT=8080
-Environment=LLAMA_CTX=8192
-Environment=LLAMA_GPU_LAYERS=999
-Environment=LLAMA_INSTALL_DIR=%h/src/llama.cpp
-```
-
-Reload and restart after editing:
+Keep user services running after logout or reboot:
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user restart llama-server
+sudo loginctl enable-linger "$USER"
 ```
 
 ## Operations
 
-Check whether the unit is running:
+Check whether the proxy is running:
 
 ```bash
-systemctl --user status llama-server
+systemctl --user status llama-swap
 ```
 
-Follow logs:
+Follow proxy and upstream logs:
 
 ```bash
-journalctl --user -u llama-server -f
+journalctl --user -u llama-swap -f
 ```
 
-Confirm the OpenAI-compatible API is answering:
+Confirm llama-swap is exposing the model list:
 
 ```bash
 curl http://127.0.0.1:8080/v1/models
 ```
 
-If the service fails immediately, check that `~/src/llama.cpp` exists, that the
-server binary has been built, and that the CUDA paths in the unit match the
-machine.
+Trigger a lazy load:
+
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemma-everyday","messages":[{"role":"user","content":"hello"}]}'
+```
+
+`llama-swap` also exposes operational endpoints:
+
+```bash
+curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/logs
+curl -Ns http://127.0.0.1:8080/logs/stream
+```
+
+## Adding Models
+
+Add one block under `models:` in `llama-swap.yaml`, then add the model ID to
+`groups.local-models.members`. Keep `${PORT}` in the command so llama-swap can
+assign a private upstream port.
+
+For heavy models on the RTX 4080, keep them in `local-models` and tune
+`--n-cpu-moe` with `llama-bench` before raising context or KV cache settings.
 
 ## rafael-chat.service
 
@@ -108,9 +135,14 @@ RAFAEL_CHAT_BIND=0.0.0.0:3031
 RAFAEL_CHAT_DATA_DIR=%h/rafael/data/chat
 RAFAEL_CHAT_WEB_DIST=%h/rafael/services/chat/web/dist
 RAFAEL_CHAT_MODEL_BASE_URL=http://rafael:8080/v1
-RAFAEL_CHAT_MODEL_NAME=Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M
+RAFAEL_CHAT_MODEL_NAME=gemma-everyday
 RAFAEL_CHAT_MODEL_TIMEOUT_SECONDS=300
+RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS=5
 ```
+
+The chat backend calls `RAFAEL_CHAT_MODEL_BASE_URL/models` and uses that response
+as the local model dropdown. If the model list is unavailable, it falls back to
+saved providers in `RAFAEL_CHAT_DATA_DIR/config.json`.
 
 Build the frontend and release binary before starting the unit:
 
@@ -120,44 +152,6 @@ npm run build
 
 cd ~/rafael
 cargo build --release -p chat
-```
-
-Install the unit into the user systemd directory:
-
-```bash
-mkdir -p ~/.config/systemd/user
-cp infra/systemd/rafael-chat.service ~/.config/systemd/user/rafael-chat.service
-systemctl --user daemon-reload
-systemctl --user enable --now rafael-chat
-```
-
-After changing the checked-in unit, copy it again and restart:
-
-```bash
-cp infra/systemd/rafael-chat.service ~/.config/systemd/user/rafael-chat.service
-systemctl --user daemon-reload
-systemctl --user restart rafael-chat
-```
-
-Keep it running after logout or reboot:
-
-```bash
-sudo loginctl enable-linger "$USER"
-```
-
-Use a drop-in for machine-specific overrides:
-
-```bash
-systemctl --user edit rafael-chat
-```
-
-Example override:
-
-```ini
-[Service]
-Environment=RAFAEL_CHAT_BIND=127.0.0.1:3031
-Environment=RAFAEL_CHAT_MODEL_BASE_URL=http://rafael:8080/v1
-Environment=RAFAEL_CHAT_MODEL_NAME=Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M
 ```
 
 Check whether the unit is running:
@@ -182,4 +176,18 @@ From Tailscale devices, use:
 
 ```txt
 http://rafael:3031
+```
+
+## llama-server.service
+
+`llama-server.service` is kept as a direct single-model fallback. Do not run it
+at the same time as `llama-swap.service`; both use port `8080`, and the
+llama-swap unit has `Conflicts=llama-server.service`.
+
+Rollback to the old direct server:
+
+```bash
+systemctl --user disable --now llama-swap.service
+systemctl --user enable --now llama-server.service
+systemctl --user restart rafael-chat.service
 ```

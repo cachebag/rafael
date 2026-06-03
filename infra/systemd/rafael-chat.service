@@ -8,13 +8,15 @@
 #   [Service]
 #   Environment=RAFAEL_CHAT_BIND=127.0.0.1:3031
 #   Environment=RAFAEL_CHAT_MODEL_BASE_URL=http://rafael:8080/v1
-#   Environment=RAFAEL_CHAT_MODEL_NAME=Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M
+#   Environment=RAFAEL_CHAT_MODEL_NAME=gemma-everyday
+#   Environment=RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS=5
 #
 # Or run: systemctl --user edit rafael-chat
 #
 [Unit]
 Description=rafael chat
-After=network-online.target llama-server.service
+Wants=llama-swap.service
+After=network-online.target llama-swap.service
 
 [Service]
 Type=simple
@@ -23,8 +25,9 @@ Environment=RAFAEL_CHAT_BIND=0.0.0.0:3031
 Environment=RAFAEL_CHAT_DATA_DIR=%h/rafael/data/chat
 Environment=RAFAEL_CHAT_WEB_DIST=%h/rafael/services/chat/web/dist
 Environment=RAFAEL_CHAT_MODEL_BASE_URL=http://rafael:8080/v1
-Environment=RAFAEL_CHAT_MODEL_NAME=Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M
+Environment=RAFAEL_CHAT_MODEL_NAME=gemma-everyday
 Environment=RAFAEL_CHAT_MODEL_TIMEOUT_SECONDS=300
+Environment=RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS=5
 
 WorkingDirectory=%h/rafael
 ExecStart=%h/rafael/target/release/chat serve

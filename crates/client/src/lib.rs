@@ -112,6 +112,26 @@ impl LocalModelClient {
         }
     }
 
+    pub async fn list_models(&self) -> Result<Vec<ModelInfo>, ClientError> {
+        let mut http_request = self.http.get(format!("{}/models", self.base_url));
+
+        if let Some(authorization) = &self.authorization {
+            http_request = http_request.header(AUTHORIZATION, authorization.expose_value());
+        }
+
+        let response = http_request
+            .send()
+            .await
+            .map_err(ClientError::Http)?
+            .error_for_status()
+            .map_err(ClientError::Http)?
+            .json::<ModelsResponse>()
+            .await
+            .map_err(ClientError::Http)?;
+
+        Ok(response.into_models())
+    }
+
     pub async fn chat(&self, request: ChatRequest) -> Result<ChatCompletion, ClientError> {
         let mut http_request = self
             .http
@@ -369,6 +389,15 @@ pub struct Usage {
     pub total_tokens: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
 pub fn parse_json_output<T>(raw: &str) -> Result<T, ClientError>
 where
     T: DeserializeOwned,
@@ -483,6 +512,55 @@ struct ChatStreamDelta {
     content: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ModelsResponse {
+    #[serde(default)]
+    data: Vec<ModelInfo>,
+    #[serde(default)]
+    models: Vec<LlamaCppModelInfo>,
+}
+
+impl ModelsResponse {
+    fn into_models(self) -> Vec<ModelInfo> {
+        if !self.data.is_empty() {
+            return self.data;
+        }
+
+        self.models
+            .into_iter()
+            .filter_map(LlamaCppModelInfo::into_model)
+            .collect()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct LlamaCppModelInfo {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+impl LlamaCppModelInfo {
+    fn into_model(self) -> Option<ModelInfo> {
+        let id = self
+            .model
+            .as_deref()
+            .or(self.name.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?
+            .to_owned();
+
+        Some(ModelInfo {
+            id,
+            name: self.name,
+            description: self.description,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -519,6 +597,39 @@ mod tests {
         assert_eq!(
             format!("{authorization:?}"),
             "AuthorizationHeader { value: SecretString(<redacted>) }"
+        );
+    }
+
+    #[test]
+    fn parses_openai_models_response() {
+        let response: ModelsResponse = serde_json::from_str(
+            r#"{"object":"list","data":[{"id":"gemma-everyday","object":"model"}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            response.into_models(),
+            vec![ModelInfo {
+                id: "gemma-everyday".to_owned(),
+                name: None,
+                description: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_llama_cpp_models_response() {
+        let response: ModelsResponse =
+            serde_json::from_str(r#"{"models":[{"name":"Qwen","model":"Qwen/Qwen2.5-Coder"}]}"#)
+                .unwrap();
+
+        assert_eq!(
+            response.into_models(),
+            vec![ModelInfo {
+                id: "Qwen/Qwen2.5-Coder".to_owned(),
+                name: Some("Qwen".to_owned()),
+                description: None,
+            }]
         );
     }
 }

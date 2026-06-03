@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub web_dist: PathBuf,
     pub default_provider: StoredProvider,
     pub model_timeout: Duration,
+    pub model_list_timeout: Duration,
 }
 
 impl AppConfig {
@@ -24,6 +25,9 @@ impl AppConfig {
         let model_timeout_seconds = reader
             .parse_or("RAFAEL_CHAT_MODEL_TIMEOUT_SECONDS", 300_u64)
             .context("failed to parse RAFAEL_CHAT_MODEL_TIMEOUT_SECONDS")?;
+        let model_list_timeout_seconds = reader
+            .parse_or("RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS", 5_u64)
+            .context("failed to parse RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS")?;
 
         Ok(Self {
             bind: reader
@@ -32,18 +36,16 @@ impl AppConfig {
             data_dir: reader.path_or("RAFAEL_CHAT_DATA_DIR", repo_root.join("data/chat")),
             web_dist: reader.path_or("RAFAEL_CHAT_WEB_DIST", service_root.join("web/dist")),
             default_provider: StoredProvider {
-                id: "local-qwen".to_owned(),
-                name: "Local Qwen".to_owned(),
+                id: "local-llama-swap".to_owned(),
+                name: "Local llama-swap".to_owned(),
                 kind: ProviderKind::OpenAiCompatible,
                 base_url: reader.string_or("RAFAEL_CHAT_MODEL_BASE_URL", "http://rafael:8080/v1"),
-                model: reader.string_or(
-                    "RAFAEL_CHAT_MODEL_NAME",
-                    "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M",
-                ),
+                model: reader.string_or("RAFAEL_CHAT_MODEL_NAME", "gemma-everyday"),
                 api_key: reader.optional_string("RAFAEL_CHAT_MODEL_API_KEY"),
                 system_prompt: reader.optional_string("RAFAEL_CHAT_SYSTEM_PROMPT"),
             },
             model_timeout: Duration::from_secs(model_timeout_seconds),
+            model_list_timeout: Duration::from_secs(model_list_timeout_seconds),
         })
     }
 }

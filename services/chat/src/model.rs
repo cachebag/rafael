@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use anyhow::{Context, bail};
-use client::{ChatMessage, ChatOptions, ChatRequest, LocalModelClient, ModelClientConfig};
+use client::{
+    ChatMessage, ChatOptions, ChatRequest, LocalModelClient, ModelClientConfig, ModelInfo,
+};
 
 use crate::types::{ChatMessageRecord, ChatRole, ProviderKind, StoredProvider};
 
@@ -34,6 +36,23 @@ where
         ProviderKind::Anthropic => {
             bail!("anthropic providers can be saved but are not chat-enabled yet")
         }
+    }
+}
+
+pub async fn list_models(
+    provider: &StoredProvider,
+    timeout: Duration,
+) -> anyhow::Result<Vec<ModelInfo>> {
+    match provider.kind {
+        ProviderKind::OpenAiCompatible => {
+            let client = LocalModelClient::new(model_client_config(provider, timeout))
+                .context("failed to create model client")?;
+            client
+                .list_models()
+                .await
+                .context("model endpoint returned an error")
+        }
+        ProviderKind::Anthropic => Ok(Vec::new()),
     }
 }
 

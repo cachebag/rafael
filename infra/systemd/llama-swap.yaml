@@ -1,0 +1,133 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
+#
+# llama-swap keeps the public OpenAI-compatible API on port 8080 and starts
+# per-model llama-server processes on private ports beginning at startPort.
+#
+# Hardware policy for rafael:
+# - RTX 4080 16GB VRAM, ~55GB RAM, Ryzen 7 5800X.
+# - Only one local model should be resident at a time.
+# - Every model below is in one swap group, so a request for model B unloads
+#   model A before B starts.
+
+healthCheckTimeout: 600
+logLevel: info
+logToStdout: both
+startPort: 18080
+globalTTL: 600
+sendLoadingState: true
+includeAliasesInList: false
+
+macros:
+  llama-server: "${env.HOME}/src/llama.cpp/build/bin/llama-server --host 127.0.0.1"
+
+models:
+  gemma-everyday:
+    name: "Gemma Everyday"
+    description: "Gemma 4 E4B instruction model for general family use, casual Q&A, recipes, workouts, and fast day-to-day chats."
+    useModelName: "ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M"
+    ttl: 600
+    cmd: |
+      # -hf: download/load the GGUF directly from Hugging Face.
+      # -ngl 999: offload all possible layers to the RTX 4080.
+      # -c 32768: 32K context for everyday chats without excessive KV memory.
+      # --jinja: use the model's tokenizer chat template.
+      # --port ${PORT}: private llama-swap-assigned upstream port.
+      # TODO: add --mmproj <projector.gguf> here if image/photo input is needed.
+      ${llama-server}
+      -hf ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M
+      -ngl 999
+      -c 32768
+      --jinja
+      --port ${PORT}
+
+  qwen3-coder:
+    name: "Qwen3.6 Coder"
+    description: "Qwen3.6 35B-A3B MoE model for daily coding and agentic work."
+    useModelName: "unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_M"
+    ttl: 600
+    cmd: |
+      # -hf: download/load the GGUF directly from Hugging Face.
+      # -ngl 999: offload all possible layers to the RTX 4080.
+      # --n-cpu-moe 24: TODO tune with llama-bench for VRAM/RAM balance.
+      # -c 65536: long coding/agent context.
+      # -fa on: enable flash attention.
+      # -ctk/-ctv q8_0: quantize KV cache to reduce memory pressure.
+      # --jinja: use the model's tokenizer chat template.
+      # --port ${PORT}: private llama-swap-assigned upstream port.
+      ${llama-server}
+      -hf unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_M
+      -ngl 999
+      --n-cpu-moe 24
+      -c 65536
+      -fa on
+      -ctk q8_0
+      -ctv q8_0
+      --jinja
+      --port ${PORT}
+
+  gpt-oss:
+    name: "GPT-OSS 20B"
+    description: "GPT-OSS 20B MoE model for research, reasoning, and reliability checks."
+    useModelName: "ggml-org/gpt-oss-20b-GGUF"
+    ttl: 600
+    cmd: |
+      # -hf: download/load the GGUF directly from Hugging Face.
+      # --n-cpu-moe 12: offload MoE experts to system RAM.
+      # -c 32768: 32K context.
+      # --jinja: use the model's tokenizer chat template.
+      # --port ${PORT}: private llama-swap-assigned upstream port.
+      ${llama-server}
+      -hf ggml-org/gpt-oss-20b-GGUF
+      --n-cpu-moe 12
+      -c 32768
+      --jinja
+      --port ${PORT}
+
+  qwen-coder-fim:
+    name: "Qwen2.5 Coder 14B"
+    description: "Qwen2.5-Coder 14B instruction model for coding, fill-in-the-middle workflows, and day-to-day utility."
+    useModelName: "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M"
+    ttl: 600
+    cmd: |
+      # -hf: download/load the GGUF directly from Hugging Face.
+      # -ngl 999: offload all possible layers to the RTX 4080.
+      # -c 32768: larger than the old 16K default while staying reasonable.
+      # --jinja: use the model's tokenizer chat template.
+      # --port ${PORT}: private llama-swap-assigned upstream port.
+      ${llama-server}
+      -hf Qwen/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M
+      -ngl 999
+      -c 32768
+      --jinja
+      --port ${PORT}
+
+  gemma-deep:
+    name: "Gemma Deep"
+    description: "Gemma 4 26B-A4B MoE model for stronger general assistance while still using one swap slot."
+    useModelName: "ggml-org/gemma-4-26B-A4B-it-GGUF:Q4_K_M"
+    ttl: 600
+    cmd: |
+      # -hf: download/load the GGUF directly from Hugging Face.
+      # -ngl 999: offload all possible layers to the RTX 4080.
+      # --n-cpu-moe 12: TODO tune with llama-bench for VRAM/RAM balance.
+      # -c 32768: 32K context.
+      # --jinja: use the model's tokenizer chat template.
+      # --port ${PORT}: private llama-swap-assigned upstream port.
+      ${llama-server}
+      -hf ggml-org/gemma-4-26B-A4B-it-GGUF:Q4_K_M
+      -ngl 999
+      --n-cpu-moe 12
+      -c 32768
+      --jinja
+      --port ${PORT}
+
+groups:
+  local-models:
+    swap: true
+    exclusive: true
+    members:
+      - gemma-everyday
+      - qwen3-coder
+      - gpt-oss
+      - qwen-coder-fim
+      - gemma-deep

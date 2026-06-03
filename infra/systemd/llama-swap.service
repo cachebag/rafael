@@ -1,0 +1,30 @@
+# Configuration is done in infra/systemd/llama-swap.yaml.
+# The default expects the llama-swap binary at:
+#
+#   ~/.local/bin/llama-swap
+#
+# Override ExecStart if your install path differs:
+#
+#   systemctl --user edit llama-swap
+#
+[Unit]
+Description=llama-swap model lifecycle proxy
+After=network-online.target
+Conflicts=llama-server.service
+
+[Service]
+Type=simple
+
+Environment=LLAMA_SWAP_CONFIG=%h/rafael/infra/systemd/llama-swap.yaml
+Environment=LLAMA_SWAP_LISTEN=0.0.0.0:8080
+Environment=PATH=/opt/cuda/bin:/usr/local/bin:/usr/bin:/bin:%h/.local/bin
+Environment=LD_LIBRARY_PATH=/opt/cuda/lib64
+
+WorkingDirectory=%h/rafael
+ExecStart=%h/.local/bin/llama-swap --config ${LLAMA_SWAP_CONFIG} --listen ${LLAMA_SWAP_LISTEN}
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
