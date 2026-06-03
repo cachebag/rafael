@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PanelLeftClose, PanelLeftOpen, SendHorizontal } from "lucide-react";
+import { PanelLeftOpen, SendHorizontal } from "lucide-react";
 import {
   compactModelName,
   providerConnectionTitle
@@ -113,19 +113,17 @@ export function ChatPanel({
       <header className="header-shell border-b border-[var(--line)] px-3 py-3 sm:px-5 sm:py-4">
         <div className="flex items-center justify-between gap-3 sm:gap-4">
           <div className="flex min-w-0 items-center gap-3">
-            <button
-              type="button"
-              className="icon-button"
-              aria-label={sidebarCollapsed ? "Open sidebar" : "Collapse sidebar"}
-              title={sidebarCollapsed ? "Open sidebar" : "Collapse sidebar"}
-              onClick={onToggleSidebar}
-            >
-              {sidebarCollapsed ? (
+            {sidebarCollapsed ? (
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Open sidebar"
+                title="Open sidebar"
+                onClick={onToggleSidebar}
+              >
                 <PanelLeftOpen aria-hidden="true" size={17} strokeWidth={2.1} />
-              ) : (
-                <PanelLeftClose aria-hidden="true" size={17} strokeWidth={2.1} />
-              )}
-            </button>
+              </button>
+            ) : null}
             <div className="min-w-0">
               <h2 className="truncate text-base font-semibold">
                 {conversation?.title ?? "New conversation"}

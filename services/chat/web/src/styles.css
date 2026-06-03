@@ -91,8 +91,28 @@ body {
     var(--bg);
 }
 
+.chat-layout {
+  display: grid;
+  min-height: 100dvh;
+  grid-template-columns: 1fr;
+}
+
+.sidebar-frame {
+  display: contents;
+}
+
 .sidebar-shell {
   background: color-mix(in srgb, var(--panel) 88%, black 12%);
+}
+
+.sidebar-drawer {
+  transform: translateX(0);
+  transition: transform 170ms ease;
+}
+
+.sidebar-drawer-collapsed {
+  pointer-events: none;
+  transform: translateX(-100%);
 }
 
 .mobile-sidebar-backdrop {
@@ -101,6 +121,13 @@ body {
   z-index: 35;
   border: 0;
   background: rgb(0 0 0 / 0.45);
+  opacity: 1;
+  transition: opacity 170ms ease;
+}
+
+.mobile-sidebar-backdrop-closed {
+  pointer-events: none;
+  opacity: 0;
 }
 
 .header-shell,
@@ -628,6 +655,36 @@ input:disabled {
 
   .status-pill {
     display: none;
+  }
+}
+
+@media (min-width: 768px) {
+  .chat-layout {
+    --sidebar-width: 320px;
+    min-height: 100dvh;
+    height: 100dvh;
+    overflow: hidden;
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+    transition: grid-template-columns 170ms ease;
+  }
+
+  .chat-layout-collapsed {
+    --sidebar-width: 0px;
+  }
+
+  .sidebar-frame {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .sidebar-frame-collapsed {
+    pointer-events: none;
+  }
+
+  .sidebar-drawer,
+  .sidebar-drawer-collapsed {
+    transform: none;
   }
 }
 

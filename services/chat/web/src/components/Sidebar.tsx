@@ -19,6 +19,7 @@ interface SidebarProps {
   selectedConversationId: string | null;
   activeProvider: PublicProvider | null;
   busy: boolean;
+  collapsed: boolean;
   onNewConversation: () => void;
   onSelectConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
@@ -32,6 +33,7 @@ export function Sidebar({
   selectedConversationId,
   activeProvider,
   busy,
+  collapsed,
   onNewConversation,
   onSelectConversation,
   onDeleteConversation,
@@ -45,7 +47,13 @@ export function Sidebar({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   return (
-    <aside className="sidebar-shell fixed inset-y-0 left-0 z-40 w-[min(88vw,320px)] border-r border-[var(--line)] md:sticky md:top-0 md:z-auto md:h-dvh md:w-auto">
+    <aside
+      className={[
+        "sidebar-shell sidebar-drawer fixed inset-y-0 left-0 z-40 w-[min(88vw,320px)] border-r border-[var(--line)] md:sticky md:top-0 md:z-auto md:h-dvh md:w-[320px]",
+        collapsed ? "sidebar-drawer-collapsed" : ""
+      ].join(" ")}
+      aria-hidden={collapsed}
+    >
       <div className="flex h-full min-h-0 flex-col gap-4 p-4 sm:gap-5 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
