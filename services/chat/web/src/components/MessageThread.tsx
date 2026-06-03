@@ -1,5 +1,6 @@
 import { memo } from "react";
 import type { ChatMessageRecord } from "../types";
+import { ActivityIndicator } from "./ActivityIndicator";
 import { LazyCopyButton } from "./LazyCopyButton";
 import { MarkdownContent } from "./MarkdownContent";
 
@@ -12,6 +13,9 @@ export const MessageThread = memo(function MessageThread({
   messages,
   busy
 }: MessageThreadProps) {
+  const showPendingResponse =
+    busy && messages.length > 0 && messages.at(-1)?.role === "user";
+
   return (
     <div className="grid w-full min-w-0 gap-5">
       {messages.map((message, index) => (
@@ -21,6 +25,13 @@ export const MessageThread = memo(function MessageThread({
           copyEnabled={canCopyMessage(message, index, messages.length, busy)}
         />
       ))}
+      {showPendingResponse ? (
+        <article className="flex w-full min-w-0 justify-start">
+          <div className="message-bubble message-bubble-model message-bubble-activity rounded-md border border-transparent bg-[var(--assistant-bg)] px-4 py-3">
+            <ActivityIndicator label="Waiting for response" />
+          </div>
+        </article>
+      ) : null}
     </div>
   );
 });
