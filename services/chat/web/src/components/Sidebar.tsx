@@ -1,10 +1,12 @@
 import {
   MoreVertical,
+  Moon,
   PanelLeftClose,
   Pin,
   PinOff,
   Plus,
   Settings,
+  Sun,
   Trash2
 } from "lucide-react";
 import { useState } from "react";
@@ -12,7 +14,8 @@ import {
   providerConnectionLabel,
   providerConnectionTitle
 } from "../display";
-import type { ChatState, ConversationSummary, PublicProvider } from "../types";
+import { themeMode, toggledTheme } from "../themes";
+import type { ChatState, ConversationSummary, PublicProvider, ThemeName } from "../types";
 
 interface SidebarProps {
   state: ChatState | null;
@@ -20,11 +23,13 @@ interface SidebarProps {
   activeProvider: PublicProvider | null;
   busy: boolean;
   collapsed: boolean;
+  theme: ThemeName;
   onNewConversation: () => void;
   onSelectConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
   onPinConversation: (id: string, pinned: boolean) => void;
   onOpenSettings: () => void;
+  onThemeChange: (theme: ThemeName) => Promise<void>;
   onCollapse: () => void;
 }
 
@@ -34,17 +39,20 @@ export function Sidebar({
   activeProvider,
   busy,
   collapsed,
+  theme,
   onNewConversation,
   onSelectConversation,
   onDeleteConversation,
   onPinConversation,
   onOpenSettings,
+  onThemeChange,
   onCollapse
 }: SidebarProps) {
   const conversations = state?.conversations ?? [];
   const pinnedConversations = conversations.filter((conversation) => conversation.pinned);
   const recentConversations = conversations.filter((conversation) => !conversation.pinned);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const switchToMode = themeMode(theme) === "dark" ? "light" : "dark";
 
   return (
     <aside
@@ -68,7 +76,7 @@ export function Sidebar({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              className="icon-button"
+              className="icon-button icon-button-subtle"
               aria-label="Collapse sidebar"
               title="Collapse sidebar"
               onClick={onCollapse}
@@ -77,7 +85,20 @@ export function Sidebar({
             </button>
             <button
               type="button"
-              className="button-primary inline-flex items-center gap-1.5 whitespace-nowrap"
+              className="icon-button icon-button-subtle"
+              aria-label={`Switch to ${switchToMode} mode`}
+              title={`Switch to ${switchToMode} mode`}
+              onClick={() => void onThemeChange(toggledTheme(theme)).catch(() => undefined)}
+            >
+              {switchToMode === "light" ? (
+                <Sun aria-hidden="true" size={17} strokeWidth={2.1} />
+              ) : (
+                <Moon aria-hidden="true" size={17} strokeWidth={2.1} />
+              )}
+            </button>
+            <button
+              type="button"
+              className="button-primary sidebar-new-button inline-flex items-center gap-1.5 whitespace-nowrap"
               disabled={busy}
               onClick={onNewConversation}
             >
@@ -89,7 +110,7 @@ export function Sidebar({
 
         <button
           type="button"
-          className="button-secondary inline-flex w-full items-center justify-center gap-2"
+          className="sidebar-settings-button inline-flex w-full items-center gap-2"
           onClick={onOpenSettings}
         >
           <Settings aria-hidden="true" size={15} strokeWidth={2.1} />
@@ -210,15 +231,13 @@ function ConversationButton({
   return (
     <div
       className={[
-        "group relative grid grid-cols-[minmax(0,1fr)_32px] items-center gap-1 rounded-md border transition-colors",
-        selected
-          ? "border-[var(--accent)] bg-[var(--selected)] shadow-[var(--shadow-soft)]"
-          : "border-transparent bg-transparent hover:border-[var(--line)] hover:bg-[var(--panel)]"
+        "conversation-row group relative grid grid-cols-[minmax(0,1fr)_32px] items-center gap-1 rounded-md transition-colors",
+        selected ? "conversation-row-selected" : ""
       ].join(" ")}
     >
       <button
         type="button"
-        className="min-w-0 px-3 py-2.5 text-left"
+        className="min-w-0 px-2.5 py-2 text-left"
         disabled={disabled}
         onClick={() => onSelect(conversation.id)}
       >
@@ -239,7 +258,7 @@ function ConversationButton({
       </button>
       <button
         type="button"
-        className="mr-1 inline-flex h-7 w-7 items-center justify-center rounded text-[var(--muted)] opacity-70 hover:bg-[var(--panel-soft)] hover:text-[var(--text)]"
+        className="conversation-action-button mr-1 inline-flex h-7 w-7 items-center justify-center rounded"
         disabled={disabled}
         aria-label={`Open ${conversation.title} actions`}
         aria-expanded={menuOpen}

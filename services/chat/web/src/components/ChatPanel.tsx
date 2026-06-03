@@ -116,7 +116,7 @@ export function ChatPanel({
             {sidebarCollapsed ? (
               <button
                 type="button"
-                className="icon-button"
+                className="icon-button icon-button-subtle"
                 aria-label="Open sidebar"
                 title="Open sidebar"
                 onClick={onToggleSidebar}

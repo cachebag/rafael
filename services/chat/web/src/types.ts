@@ -1,4 +1,4 @@
-export type ThemeName = "charcoal" | "gruvbox";
+export type ThemeName = "charcoal" | "charcoal_light" | "gruvbox" | "gruvbox_light";
 
 export type ProviderKind = "open_ai_compatible" | "anthropic";
 

@@ -41,6 +41,7 @@ export default function App() {
     }
     return state.providers.find((provider) => provider.id === state.activeProviderId) ?? null;
   }, [state]);
+  const activeTheme = state?.theme ?? "charcoal";
 
   const refreshState = useCallback(async () => {
     const nextState = await getState();
@@ -343,11 +344,13 @@ export default function App() {
               activeProvider={activeProvider}
               busy={busy}
               collapsed={sidebarCollapsed}
+              theme={activeTheme}
               onNewConversation={handleNewConversation}
               onSelectConversation={handleSelectConversation}
               onDeleteConversation={handleDeleteConversation}
               onPinConversation={handlePinConversation}
               onOpenSettings={handleOpenSettings}
+              onThemeChange={handleThemeChange}
               onCollapse={closeSidebar}
             />
           ) : null}

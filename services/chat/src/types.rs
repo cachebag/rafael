@@ -19,7 +19,9 @@ pub struct ChatSettings {
 #[serde(rename_all = "snake_case")]
 pub enum ThemeName {
     Charcoal,
+    CharcoalLight,
     Gruvbox,
+    GruvboxLight,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
