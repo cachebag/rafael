@@ -31,7 +31,9 @@ export function ChatPanel({
   const [draft, setDraft] = useState("");
   const [followStream, setFollowStream] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const wasBusyRef = useRef(false);
+  const restoreComposerFocusRef = useRef(false);
   const canSend = draft.trim().length > 0 && !busy && activeProvider?.chatSupported === true;
   const modelLabel =
     activeProvider === null ? "No model selected" : compactModelName(activeProvider.model);
@@ -41,8 +43,13 @@ export function ChatPanel({
   }, [conversation?.id, conversation?.messages]);
 
   useEffect(() => {
-    if (busy && !wasBusyRef.current) {
+    const wasBusy = wasBusyRef.current;
+    if (busy && !wasBusy) {
       setFollowStream(true);
+    }
+    if (!busy && wasBusy && restoreComposerFocusRef.current) {
+      restoreComposerFocusRef.current = false;
+      requestAnimationFrame(() => composerRef.current?.focus());
     }
     wasBusyRef.current = busy;
   }, [busy]);
@@ -59,6 +66,7 @@ export function ChatPanel({
     if (content === "" || busy) {
       return;
     }
+    restoreComposerFocusRef.current = true;
     setDraft("");
     await onSend(content);
   }
@@ -105,6 +113,7 @@ export function ChatPanel({
       return;
     }
 
+    restoreComposerFocusRef.current = true;
     void onSend(prompt);
   }
 
@@ -172,6 +181,7 @@ export function ChatPanel({
           ) : null}
           <div className="rounded-md border border-[var(--line)] bg-[var(--panel)] p-2 shadow-[var(--shadow-soft)]">
             <textarea
+              ref={composerRef}
               className="composer-input max-h-28 min-h-12 w-full resize-none rounded border-0 bg-transparent px-2 py-2 text-base leading-6 text-[var(--text)] outline-none sm:text-sm"
               rows={2}
               placeholder={`Message ${activeProvider?.name ?? "rafael"}...`}
