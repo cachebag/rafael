@@ -17,12 +17,9 @@ export function ActivityIndicator({
       aria-live="polite"
       aria-label={label}
     >
-      <span className="activity-glyph" aria-hidden="true">
-        <span className="activity-thread activity-thread-primary" />
-        <span className="activity-thread activity-thread-secondary" />
-        <span className="activity-node activity-node-a" />
-        <span className="activity-node activity-node-b" />
-        <span className="activity-node activity-node-c" />
+      <span className="activity-dots" aria-hidden="true">
+        <span />
+        <span />
         <span />
       </span>
     </div>

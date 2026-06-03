@@ -525,139 +525,47 @@ input:disabled {
   transform-origin: left center;
 }
 
-.message-bubble-activity {
-  max-width: min(7rem, calc(100% - 2rem));
+.activity-dots {
+  display: inline-flex;
+  height: 1.25rem;
+  align-items: flex-end;
+  gap: 0.34rem;
+  padding: 0.15rem 0;
 }
 
-.activity-glyph {
-  position: relative;
-  display: block;
-  width: 3rem;
-  height: 1.35rem;
-  opacity: 0.88;
-}
-
-.activity-glyph::before {
-  position: absolute;
-  inset: 0.12rem 0.22rem;
-  border-radius: 999px;
-  background:
-    radial-gradient(circle at 20% 62%, currentColor 0 0.13rem, transparent 0.14rem),
-    radial-gradient(circle at 52% 24%, currentColor 0 0.12rem, transparent 0.13rem),
-    radial-gradient(circle at 82% 58%, currentColor 0 0.11rem, transparent 0.12rem);
-  content: "";
-  filter: drop-shadow(0 0 0.55rem color-mix(in srgb, currentColor 34%, transparent));
-  opacity: 0.42;
-}
-
-.activity-thread {
-  position: absolute;
-  height: 1px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, transparent, currentColor, transparent);
-  opacity: 0.28;
-  transform-origin: left center;
-}
-
-.activity-thread-primary {
-  top: 0.78rem;
-  left: 0.55rem;
-  width: 1.22rem;
-  transform: rotate(-31deg);
-  animation: activity-thread-glow 1.9s ease-in-out infinite;
-}
-
-.activity-thread-secondary {
-  top: 0.48rem;
-  left: 1.42rem;
-  width: 1.18rem;
-  transform: rotate(24deg);
-  animation: activity-thread-glow 1.9s ease-in-out 420ms infinite;
-}
-
-.activity-node {
-  position: absolute;
-  width: 0.36rem;
-  height: 0.36rem;
-  border: 1px solid color-mix(in srgb, currentColor 62%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--assistant-bg) 76%, currentColor 24%);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--assistant-bg) 70%, transparent),
-    0 0 0.65rem color-mix(in srgb, currentColor 22%, transparent);
-  animation: activity-node-breathe 1.9s ease-in-out infinite;
-}
-
-.activity-node-a {
-  top: 0.72rem;
-  left: 0.42rem;
-}
-
-.activity-node-b {
-  top: 0.18rem;
-  left: 1.42rem;
-  animation-delay: 260ms;
-}
-
-.activity-node-c {
-  top: 0.64rem;
-  left: 2.46rem;
-  animation-delay: 520ms;
-}
-
-.activity-glyph > span:last-child {
-  position: absolute;
-  top: 0.58rem;
-  left: 0.5rem;
-  width: 0.28rem;
-  height: 0.28rem;
+.activity-dots span {
+  width: 0.42rem;
+  height: 0.42rem;
   border-radius: 999px;
   background: currentColor;
-  opacity: 0.35;
-  offset-path: path("M 0 7 C 8 -6 22 -6 32 5");
-  animation: activity-spark 1.9s ease-in-out infinite;
+  opacity: 0.34;
+  animation: activity-dot-hop 1.05s ease-in-out infinite;
 }
 
-@keyframes activity-node-breathe {
+.activity-dots span:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.activity-dots span:nth-child(3) {
+  animation-delay: 280ms;
+}
+
+.message-activity {
+  margin-left: 0.9rem;
+  padding: 0.15rem 0 0.1rem;
+}
+
+@keyframes activity-dot-hop {
   0%,
+  70%,
   100% {
-    opacity: 0.42;
-    transform: scale(0.86);
+    opacity: 0.34;
+    transform: translateY(0) scale(0.92);
   }
 
-  48% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes activity-thread-glow {
-  0%,
-  100% {
-    opacity: 0.16;
-  }
-
-  46% {
-    opacity: 0.46;
-  }
-}
-
-@keyframes activity-spark {
-  0% {
-    offset-distance: 0%;
-    opacity: 0;
-    transform: scale(0.7);
-  }
-
-  18%,
-  72% {
-    opacity: 0.48;
-  }
-
-  100% {
-    offset-distance: 100%;
-    opacity: 0;
-    transform: scale(1);
+  28% {
+    opacity: 0.92;
+    transform: translateY(-0.48rem) scale(1);
   }
 }
 

@@ -27,7 +27,7 @@ export const MessageThread = memo(function MessageThread({
       ))}
       {showPendingResponse ? (
         <article className="flex w-full min-w-0 justify-start">
-          <div className="message-bubble message-bubble-model message-bubble-activity rounded-md border border-transparent bg-[var(--assistant-bg)] px-4 py-3">
+          <div className="message-activity">
             <ActivityIndicator label="Waiting for response" />
           </div>
         </article>
