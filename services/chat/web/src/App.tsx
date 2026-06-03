@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createConversation,
   deleteConversation,
@@ -28,10 +28,12 @@ export default function App() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => isMobileViewport());
+  const [sidebarMounted, setSidebarMounted] = useState(() => !isMobileViewport());
   const [isMobile, setIsMobile] = useState(() => isMobileViewport());
   const [loading, setLoading] = useState<LoadState>("idle");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sidebarOpenFrameRef = useRef<number | null>(null);
 
   const activeProvider = useMemo(() => {
     if (state === null) {
@@ -79,13 +81,34 @@ export default function App() {
     const update = (): void => {
       setIsMobile(media.matches);
       if (media.matches) {
-        setSidebarCollapsed(true);
+        closeSidebar();
       }
     };
 
     update();
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarCollapsed) {
+      setSidebarMounted(true);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setSidebarMounted(false);
+    }, SIDEBAR_ANIMATION_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    return () => {
+      if (sidebarOpenFrameRef.current !== null) {
+        window.cancelAnimationFrame(sidebarOpenFrameRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -122,7 +145,7 @@ export default function App() {
       setConversation(nextConversation);
       setSelectedConversationId(nextConversation.id);
       if (isMobile) {
-        setSidebarCollapsed(true);
+        closeSidebar();
       }
       await refreshState();
     } catch (cause) {
@@ -212,14 +235,43 @@ export default function App() {
   function handleSelectConversation(id: string): void {
     setSelectedConversationId(id);
     if (isMobile) {
-      setSidebarCollapsed(true);
+      closeSidebar();
     }
   }
 
   function handleOpenSettings(): void {
     setSettingsOpen(true);
     if (isMobile) {
-      setSidebarCollapsed(true);
+      closeSidebar();
+    }
+  }
+
+  function openSidebar(): void {
+    if (sidebarOpenFrameRef.current !== null) {
+      window.cancelAnimationFrame(sidebarOpenFrameRef.current);
+    }
+
+    setSidebarMounted(true);
+    sidebarOpenFrameRef.current = window.requestAnimationFrame(() => {
+      setSidebarCollapsed(false);
+      sidebarOpenFrameRef.current = null;
+    });
+  }
+
+  function closeSidebar(): void {
+    if (sidebarOpenFrameRef.current !== null) {
+      window.cancelAnimationFrame(sidebarOpenFrameRef.current);
+      sidebarOpenFrameRef.current = null;
+    }
+
+    setSidebarCollapsed(true);
+  }
+
+  function toggleSidebar(): void {
+    if (sidebarCollapsed) {
+      openSidebar();
+    } else {
+      closeSidebar();
     }
   }
 
@@ -263,32 +315,43 @@ export default function App() {
     <main className="app-shell min-h-dvh text-[var(--text)]">
       <div
         className={[
-          "grid min-h-dvh grid-cols-1 md:h-dvh md:overflow-hidden",
-          sidebarCollapsed ? "md:grid-cols-1" : "md:grid-cols-[320px_minmax(0,1fr)]"
+          "chat-layout",
+          sidebarCollapsed ? "chat-layout-collapsed" : ""
         ].join(" ")}
       >
-        {!sidebarCollapsed ? (
+        {sidebarMounted ? (
           <button
             type="button"
-            className="mobile-sidebar-backdrop md:hidden"
+            className={[
+              "mobile-sidebar-backdrop md:hidden",
+              sidebarCollapsed ? "mobile-sidebar-backdrop-closed" : ""
+            ].join(" ")}
             aria-label="Close sidebar"
-            onClick={() => setSidebarCollapsed(true)}
+            onClick={closeSidebar}
           />
         ) : null}
-        {sidebarCollapsed ? null : (
-          <Sidebar
-            state={state}
-            selectedConversationId={selectedConversationId}
-            activeProvider={activeProvider}
-            busy={busy}
-            onNewConversation={handleNewConversation}
-            onSelectConversation={handleSelectConversation}
-            onDeleteConversation={handleDeleteConversation}
-            onPinConversation={handlePinConversation}
-            onOpenSettings={handleOpenSettings}
-            onCollapse={() => setSidebarCollapsed(true)}
-          />
-        )}
+        <div
+          className={[
+            "sidebar-frame",
+            sidebarCollapsed ? "sidebar-frame-collapsed" : ""
+          ].join(" ")}
+        >
+          {sidebarMounted ? (
+            <Sidebar
+              state={state}
+              selectedConversationId={selectedConversationId}
+              activeProvider={activeProvider}
+              busy={busy}
+              collapsed={sidebarCollapsed}
+              onNewConversation={handleNewConversation}
+              onSelectConversation={handleSelectConversation}
+              onDeleteConversation={handleDeleteConversation}
+              onPinConversation={handlePinConversation}
+              onOpenSettings={handleOpenSettings}
+              onCollapse={closeSidebar}
+            />
+          ) : null}
+        </div>
         <ChatPanel
           conversation={conversation}
           activeProvider={activeProvider}
@@ -296,7 +359,7 @@ export default function App() {
           error={error}
           loading={loading}
           sidebarCollapsed={sidebarCollapsed}
-          onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
+          onToggleSidebar={toggleSidebar}
           onSend={handleSend}
         />
       </div>
@@ -385,6 +448,7 @@ function titleFromContent(content: string): string {
 }
 
 const STREAMING_MESSAGE_ID = "streaming-assistant";
+const SIDEBAR_ANIMATION_MS = 170;
 
 function isMobileViewport(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
