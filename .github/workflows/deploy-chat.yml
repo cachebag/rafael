@@ -41,5 +41,13 @@ jobs:
           systemctl --user restart rafael-chat
           systemctl --user is-active rafael-chat
 
-      - name: smoke test
-        run: curl -fsS http://127.0.0.1:3031/api/state >/dev/null
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3031/api/state >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "chat service did not become ready on port 3031"
+          journalctl --user -u rafael-chat -n 20 --no-pager
+          exit 1
