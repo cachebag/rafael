@@ -1,0 +1,45 @@
+name: deploy chat
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "services/chat/**"
+      - "crates/client/**"
+      - "crates/common/**"
+      - "crates/config/**"
+      - "infra/systemd/rafael-chat.service"
+      - ".github/workflows/deploy-chat.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-chat
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: deploy chat on rafael
+        run: |
+          set -euo pipefail
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+
+          REPO="$HOME/rafael"
+          cd "$REPO"
+
+          git fetch origin master
+          git reset --hard origin/master
+
+          cd services/chat/web
+          npm ci
+          npm run build
+
+          cd "$REPO"
+          cargo build --release -p chat
+
+          systemctl --user restart rafael-chat
+          systemctl --user is-active rafael-chat
+
+      - name: smoke test
+        run: curl -fsS http://127.0.0.1:3031/api/state >/dev/null
