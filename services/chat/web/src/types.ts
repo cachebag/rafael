@@ -4,6 +4,16 @@ export type ProviderKind = "open_ai_compatible" | "anthropic";
 
 export type ChatRole = "user" | "assistant" | "system";
 
+export interface AuthUser {
+  id: string;
+  username: string;
+}
+
+export interface AuthSession {
+  token: string;
+  user: AuthUser;
+}
+
 export interface PublicProvider {
   id: string;
   name: string;

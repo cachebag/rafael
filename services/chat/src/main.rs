@@ -1,3 +1,4 @@
+mod auth;
 mod config;
 mod model;
 mod server;
@@ -40,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
                 default_provider = %config.default_provider.id,
                 default_model = %config.default_provider.model,
                 model_list_timeout_seconds = config.model_list_timeout.as_secs(),
+                auth_token_days = config.auth_token_ttl.num_days(),
                 web_tools_enabled = config.tools.enabled(),
                 "configuration loaded"
             );

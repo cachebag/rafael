@@ -138,6 +138,7 @@ RAFAEL_CHAT_MODEL_BASE_URL=http://rafael:8080/v1
 RAFAEL_CHAT_MODEL_NAME=gemma-everyday
 RAFAEL_CHAT_MODEL_TIMEOUT_SECONDS=300
 RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS=5
+RAFAEL_CHAT_AUTH_TOKEN_DAYS=30
 RAFAEL_CHAT_WEB_SEARCH_PROVIDER=disabled
 RAFAEL_CHAT_WEB_SEARCH_FETCH_RESULTS=3
 RAFAEL_CHAT_WEB_SEARCH_FETCH_MAX_BYTES=16384
@@ -145,7 +146,12 @@ RAFAEL_CHAT_WEB_SEARCH_FETCH_MAX_BYTES=16384
 
 The chat backend calls `RAFAEL_CHAT_MODEL_BASE_URL/models` and uses that response
 as the local model dropdown. If the model list is unavailable, it falls back to
-saved providers in `RAFAEL_CHAT_DATA_DIR/config.json`.
+saved providers in the authenticated user's chat config.
+
+Chat requires login. Users register with an allowed first name and password;
+allowed names are `Akrm`, `Nowar`, and `Sofia`, matched case-insensitively. JWTs
+are signed with `RAFAEL_CHAT_DATA_DIR/auth_secret`, default to 30 days, and each
+user gets isolated chat state under `RAFAEL_CHAT_DATA_DIR/users/<name>/chat/`.
 
 Chat web tools are disabled until a provider is configured in a drop-in:
 

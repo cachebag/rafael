@@ -3,7 +3,7 @@ use std::{convert::Infallible, sync::Arc};
 use axum::{
     Json, Router,
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode, header},
     response::{
         IntoResponse, Response,
         sse::{Event, KeepAlive, Sse},
@@ -23,30 +23,32 @@ use tower_http::services::{ServeDir, ServeFile};
 use tracing::{info, warn};
 
 use crate::{
+    auth::{AuthFailure, AuthSession, AuthStore},
     config::AppConfig,
     model,
     store::{ChatStore, clean_optional, new_id},
     tools::ChatToolRuntime,
     types::{
-        ChatConfigFile, ChatMessageRecord, ChatRole, ChatStateResponse, Conversation,
-        CreateConversationRequest, ProviderKind, PublicProvider, SaveProviderRequest,
-        SendMessageRequest, StoredProvider, UpdateConversationRequest, UpdateSettingsRequest,
+        AuthRequest, AuthSessionResponse, ChatConfigFile, ChatMessageRecord, ChatRole,
+        ChatStateResponse, Conversation, CreateConversationRequest, ProviderKind, PublicProvider,
+        PublicUser, SaveProviderRequest, SendMessageRequest, StoredProvider,
+        UpdateConversationRequest, UpdateSettingsRequest,
     },
 };
 
 #[derive(Clone)]
 struct ServerState {
     config: AppConfig,
-    store: ChatStore,
+    auth: AuthStore,
     writes: Arc<Mutex<()>>,
     tools: Option<ChatToolRuntime>,
 }
 
 pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
-    let store = ChatStore::new(config.data_dir.clone());
+    let auth = AuthStore::new(config.data_dir.clone(), config.auth_token_ttl).await?;
     let state = ServerState {
         config: config.clone(),
-        store,
+        auth,
         writes: Arc::new(Mutex::new(())),
         tools: if config.tools.enabled() {
             Some(ChatToolRuntime::new(config.tools.clone())?)
@@ -55,12 +57,10 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
         },
     };
 
-    state
-        .store
-        .load_or_initialize_config(&state.config.default_provider)
-        .await?;
-
     let api = Router::new()
+        .route("/auth/register", post(register_user))
+        .route("/auth/login", post(login_user))
+        .route("/auth/me", get(get_current_user))
         .route("/state", get(get_state))
         .route("/providers", post(save_provider))
         .route("/settings", patch(update_settings))
@@ -100,12 +100,47 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_state(State(state): State<ServerState>) -> Result<Json<ChatStateResponse>, ApiError> {
-    let config = state.chat_config().await?;
+async fn register_user(
+    State(state): State<ServerState>,
+    Json(request): Json<AuthRequest>,
+) -> Result<Json<AuthSessionResponse>, ApiError> {
+    let _guard = state.writes.lock().await;
+    let session = state
+        .auth
+        .register(&request.username, &request.password)
+        .await?;
+    Ok(Json(auth_session_response(session)))
+}
+
+async fn login_user(
+    State(state): State<ServerState>,
+    Json(request): Json<AuthRequest>,
+) -> Result<Json<AuthSessionResponse>, ApiError> {
+    let session = state
+        .auth
+        .login(&request.username, &request.password)
+        .await?;
+    Ok(Json(auth_session_response(session)))
+}
+
+async fn get_current_user(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<PublicUser>, ApiError> {
+    Ok(Json(authenticate(&state, &headers)?))
+}
+
+async fn get_state(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<ChatStateResponse>, ApiError> {
+    let user = authenticate(&state, &headers)?;
+    let store = state.auth.user_chat_store(&user);
+    let config = state.chat_config(&store).await?;
     let providers = state.runtime_providers(&config).await;
     let active_provider_id =
         active_provider_id(&config, &providers, &state.config.default_provider);
-    let conversations = state.store.list_conversations().await?;
+    let conversations = store.list_conversations().await?;
     Ok(Json(ChatStateResponse {
         providers: providers.iter().map(PublicProvider::from_stored).collect(),
         active_provider_id,
@@ -116,24 +151,32 @@ async fn get_state(State(state): State<ServerState>) -> Result<Json<ChatStateRes
 
 async fn list_conversations(
     State(state): State<ServerState>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<crate::types::ConversationSummary>>, ApiError> {
-    Ok(Json(state.store.list_conversations().await?))
+    let user = authenticate(&state, &headers)?;
+    let store = state.auth.user_chat_store(&user);
+    Ok(Json(store.list_conversations().await?))
 }
 
 async fn create_conversation(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(request): Json<CreateConversationRequest>,
 ) -> Result<Json<Conversation>, ApiError> {
+    let user = authenticate(&state, &headers)?;
+    let store = state.auth.user_chat_store(&user);
     let _guard = state.writes.lock().await;
-    Ok(Json(state.store.create_conversation(request.title).await?))
+    Ok(Json(store.create_conversation(request.title).await?))
 }
 
 async fn get_conversation(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Conversation>, ApiError> {
-    let conversation = state
-        .store
+    let user = authenticate(&state, &headers)?;
+    let store = state.auth.user_chat_store(&user);
+    let conversation = store
         .get_conversation(&id)
         .await?
         .ok_or_else(|| ApiError::not_found("conversation not found"))?;
@@ -142,12 +185,14 @@ async fn get_conversation(
 
 async fn update_conversation(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Json(request): Json<UpdateConversationRequest>,
 ) -> Result<Json<Conversation>, ApiError> {
+    let user = authenticate(&state, &headers)?;
+    let store = state.auth.user_chat_store(&user);
     let _guard = state.writes.lock().await;
-    let mut conversation = state
-        .store
+    let mut conversation = store
         .get_conversation(&id)
         .await?
         .ok_or_else(|| ApiError::not_found("conversation not found"))?;
@@ -157,16 +202,19 @@ async fn update_conversation(
         conversation.updated_at = Utc::now();
     }
 
-    state.store.save_conversation(&conversation).await?;
+    store.save_conversation(&conversation).await?;
     Ok(Json(conversation))
 }
 
 async fn delete_conversation(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
+    let user = authenticate(&state, &headers)?;
+    let store = state.auth.user_chat_store(&user);
     let _guard = state.writes.lock().await;
-    if state.store.delete_conversation(&id).await? {
+    if store.delete_conversation(&id).await? {
         Ok(StatusCode::NO_CONTENT.into_response())
     } else {
         Err(ApiError::not_found("conversation not found"))
@@ -175,12 +223,15 @@ async fn delete_conversation(
 
 async fn delete_conversations(
     State(state): State<ServerState>,
+    headers: HeaderMap,
 ) -> Result<Json<ChatStateResponse>, ApiError> {
+    let user = authenticate(&state, &headers)?;
+    let store = state.auth.user_chat_store(&user);
     let _guard = state.writes.lock().await;
-    let deleted = state.store.delete_all_conversations().await?;
-    info!(deleted, "purged chat conversations");
+    let deleted = store.delete_all_conversations().await?;
+    info!(user = %user.id, deleted, "purged chat conversations");
 
-    let config = state.chat_config().await?;
+    let config = state.chat_config(&store).await?;
     let providers = state.runtime_providers(&config).await;
     let active_provider_id =
         active_provider_id(&config, &providers, &state.config.default_provider);
@@ -195,12 +246,15 @@ async fn delete_conversations(
 
 async fn send_message(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Json(request): Json<SendMessageRequest>,
 ) -> Result<Json<Conversation>, ApiError> {
     let content = clean_required(request.content, "message content")?;
+    let user = authenticate(&state, &headers)?;
+    let store = state.auth.user_chat_store(&user);
     let _guard = state.writes.lock().await;
-    let config = state.chat_config().await?;
+    let config = state.chat_config(&store).await?;
     let providers = state.runtime_providers(&config).await;
     let default_provider_id =
         active_provider_id(&config, &providers, &state.config.default_provider);
@@ -221,8 +275,7 @@ async fn send_message(
         ));
     }
 
-    let mut conversation = state
-        .store
+    let mut conversation = store
         .get_conversation(&id)
         .await?
         .ok_or_else(|| ApiError::not_found("conversation not found"))?;
@@ -237,7 +290,7 @@ async fn send_message(
     });
     conversation.title = conversation_title(&conversation);
     conversation.updated_at = now;
-    state.store.save_conversation(&conversation).await?;
+    store.save_conversation(&conversation).await?;
 
     let response =
         match model::complete_chat(provider, &conversation.messages, state.config.model_timeout)
@@ -260,22 +313,26 @@ async fn send_message(
         metadata: None,
     });
     conversation.updated_at = now;
-    state.store.save_conversation(&conversation).await?;
+    store.save_conversation(&conversation).await?;
 
     Ok(Json(conversation))
 }
 
 async fn stream_message(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Json(request): Json<SendMessageRequest>,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let content = clean_required(request.content, "message content")?;
+    let user = authenticate(&state, &headers)?;
     let provider_id = request.provider_id;
     let (tx, rx) = mpsc::unbounded_channel();
 
     tokio::spawn(async move {
-        if let Err(err) = stream_message_worker(state, id, content, provider_id, tx.clone()).await {
+        if let Err(err) =
+            stream_message_worker(state, user, id, content, provider_id, tx.clone()).await
+        {
             warn!(error = %err, "streaming message failed");
             let _ = tx.send(ChatStreamEvent::Error {
                 error: "model endpoint returned an error".to_owned(),
@@ -289,14 +346,15 @@ async fn stream_message(
 
 async fn stream_message_worker(
     state: ServerState,
+    user: PublicUser,
     id: String,
     content: String,
     requested_provider_id: Option<String>,
     tx: mpsc::UnboundedSender<ChatStreamEvent>,
 ) -> anyhow::Result<()> {
+    let store = state.auth.user_chat_store(&user);
     let _guard = state.writes.lock().await;
-    let config = state
-        .store
+    let config = store
         .load_or_initialize_config(&state.config.default_provider)
         .await?;
     let providers = state.runtime_providers(&config).await;
@@ -317,8 +375,7 @@ async fn stream_message_worker(
         anyhow::bail!("selected provider is not chat-enabled yet");
     }
 
-    let mut conversation = state
-        .store
+    let mut conversation = store
         .get_conversation(&id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("conversation not found"))?;
@@ -333,7 +390,7 @@ async fn stream_message_worker(
     });
     conversation.title = conversation_title(&conversation);
     conversation.updated_at = now;
-    state.store.save_conversation(&conversation).await?;
+    store.save_conversation(&conversation).await?;
     let _ = tx.send(ChatStreamEvent::Conversation {
         conversation: conversation.clone(),
     });
@@ -366,7 +423,7 @@ async fn stream_message_worker(
         metadata: assistant_response.metadata,
     });
     conversation.updated_at = now;
-    state.store.save_conversation(&conversation).await?;
+    store.save_conversation(&conversation).await?;
     let _ = tx.send(ChatStreamEvent::Conversation { conversation });
     let _ = tx.send(ChatStreamEvent::Done);
 
@@ -375,10 +432,13 @@ async fn stream_message_worker(
 
 async fn save_provider(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(request): Json<SaveProviderRequest>,
 ) -> Result<Json<PublicProvider>, ApiError> {
+    let user = authenticate(&state, &headers)?;
+    let store = state.auth.user_chat_store(&user);
     let _guard = state.writes.lock().await;
-    let mut config = state.chat_config().await?;
+    let mut config = state.chat_config(&store).await?;
     let provider = normalize_provider(request, &config)?;
     let public = PublicProvider::from_stored(&provider);
 
@@ -399,16 +459,19 @@ async fn save_provider(
         config.settings.active_provider_id = public.id.clone();
     }
 
-    state.store.save_config(&config).await?;
+    store.save_config(&config).await?;
     Ok(Json(public))
 }
 
 async fn update_settings(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(request): Json<UpdateSettingsRequest>,
 ) -> Result<Json<ChatStateResponse>, ApiError> {
+    let user = authenticate(&state, &headers)?;
+    let store = state.auth.user_chat_store(&user);
     let _guard = state.writes.lock().await;
-    let mut config = state.chat_config().await?;
+    let mut config = state.chat_config(&store).await?;
     let providers = state.runtime_providers(&config).await;
 
     if let Some(active_provider_id) = request
@@ -434,11 +497,11 @@ async fn update_settings(
         config.settings.theme = theme;
     }
 
-    state.store.save_config(&config).await?;
+    store.save_config(&config).await?;
     let providers = state.runtime_providers(&config).await;
     let active_provider_id =
         active_provider_id(&config, &providers, &state.config.default_provider);
-    let conversations = state.store.list_conversations().await?;
+    let conversations = store.list_conversations().await?;
     Ok(Json(ChatStateResponse {
         providers: providers.iter().map(PublicProvider::from_stored).collect(),
         active_provider_id,
@@ -448,9 +511,8 @@ async fn update_settings(
 }
 
 impl ServerState {
-    async fn chat_config(&self) -> Result<ChatConfigFile, ApiError> {
-        Ok(self
-            .store
+    async fn chat_config(&self, store: &ChatStore) -> Result<ChatConfigFile, ApiError> {
+        Ok(store
             .load_or_initialize_config(&self.config.default_provider)
             .await?)
     }
@@ -652,6 +714,27 @@ fn clean_required(value: String, label: &'static str) -> Result<String, ApiError
     clean_optional(Some(value)).ok_or_else(|| ApiError::bad_request(format!("{label} is required")))
 }
 
+fn auth_session_response(session: AuthSession) -> AuthSessionResponse {
+    AuthSessionResponse {
+        token: session.token,
+        user: session.user,
+    }
+}
+
+fn authenticate(state: &ServerState, headers: &HeaderMap) -> Result<PublicUser, ApiError> {
+    let token = bearer_token(headers).ok_or_else(|| ApiError::unauthorized("login required"))?;
+    state.auth.verify_token(token).map_err(ApiError::from)
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?.trim();
+    value
+        .strip_prefix("Bearer ")
+        .or_else(|| value.strip_prefix("bearer "))
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+}
+
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
@@ -662,6 +745,20 @@ impl ApiError {
     fn bad_request(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
+            message: message.into(),
+        }
+    }
+
+    fn unauthorized(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message: message.into(),
+        }
+    }
+
+    fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
             message: message.into(),
         }
     }
@@ -677,6 +774,27 @@ impl ApiError {
         Self {
             status: StatusCode::BAD_GATEWAY,
             message: message.into(),
+        }
+    }
+}
+
+impl From<AuthFailure> for ApiError {
+    fn from(error: AuthFailure) -> Self {
+        match error {
+            AuthFailure::NotAllowed | AuthFailure::WeakPassword => {
+                Self::bad_request(error.user_message())
+            }
+            AuthFailure::AlreadyRegistered => Self::conflict(error.user_message()),
+            AuthFailure::InvalidCredentials | AuthFailure::InvalidToken => {
+                Self::unauthorized(error.user_message())
+            }
+            AuthFailure::Internal(source) => {
+                warn!(error = %source, "authentication failed");
+                Self {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    message: "authentication failed".to_owned(),
+                }
+            }
         }
     }
 }

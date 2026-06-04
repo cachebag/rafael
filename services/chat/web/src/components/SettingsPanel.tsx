@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ReactNode, SelectHTMLAttributes } from "react";
-import { ChevronDown, Moon, Sun, Trash2, X } from "lucide-react";
+import { ChevronDown, LogOut, Moon, Sun, Trash2, X } from "lucide-react";
 import { compactModelName } from "../display";
 import {
   composeTheme,
@@ -10,11 +10,12 @@ import {
   toggledTheme,
   type ThemeBaseName
 } from "../themes";
-import type { PublicProvider, ThemeName } from "../types";
+import type { AuthUser, PublicProvider, ThemeName } from "../types";
 
 interface SettingsPanelProps {
   providers: PublicProvider[];
   activeProviderId: string;
+  user: AuthUser;
   conversationCount: number;
   busy: boolean;
   theme: ThemeName;
@@ -22,18 +23,21 @@ interface SettingsPanelProps {
   onProviderChange: (id: string) => Promise<void>;
   onThemeChange: (theme: ThemeName) => Promise<void>;
   onPurgeConversations: () => Promise<void>;
+  onLogout: () => void;
 }
 
 export function SettingsPanel({
   providers,
   activeProviderId,
+  user,
   conversationCount,
   busy,
   theme,
   onClose,
   onProviderChange,
   onThemeChange,
-  onPurgeConversations
+  onPurgeConversations,
+  onLogout
 }: SettingsPanelProps) {
   const activeProvider =
     providers.find((provider) => provider.id === activeProviderId) ?? providers[0];
@@ -177,6 +181,25 @@ export function SettingsPanel({
             ) : (
               <p className="text-sm text-[var(--muted)]">No model selected.</p>
             )}
+          </section>
+
+          <section className="settings-section">
+            <h3 className="settings-section-title">Account</h3>
+            <div className="settings-account-row">
+              <div className="min-w-0">
+                <p className="settings-account-name">{user.username}</p>
+                <p className="settings-account-copy">Signed in on this browser.</p>
+              </div>
+              <button
+                type="button"
+                className="button-secondary settings-logout-button"
+                disabled={controlsDisabled}
+                onClick={onLogout}
+              >
+                <LogOut aria-hidden="true" size={15} strokeWidth={2.1} />
+                Sign out
+              </button>
+            </div>
           </section>
 
           <section className="settings-section settings-danger-section">

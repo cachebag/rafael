@@ -15,6 +15,7 @@ pub struct AppConfig {
     pub default_provider: StoredProvider,
     pub model_timeout: Duration,
     pub model_list_timeout: Duration,
+    pub auth_token_ttl: chrono::Duration,
     pub tools: ChatToolsConfig,
 }
 
@@ -31,6 +32,10 @@ impl AppConfig {
         let model_list_timeout_seconds = reader
             .parse_or("RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS", 5_u64)
             .context("failed to parse RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS")?;
+        let auth_token_days = reader
+            .parse_or("RAFAEL_CHAT_AUTH_TOKEN_DAYS", 30_i64)
+            .context("failed to parse RAFAEL_CHAT_AUTH_TOKEN_DAYS")?
+            .clamp(1, 365);
         let web_search_timeout_seconds = reader
             .parse_or("RAFAEL_CHAT_WEB_SEARCH_TIMEOUT_SECONDS", 15_u64)
             .context("failed to parse RAFAEL_CHAT_WEB_SEARCH_TIMEOUT_SECONDS")?;
@@ -76,6 +81,7 @@ impl AppConfig {
             },
             model_timeout: Duration::from_secs(model_timeout_seconds),
             model_list_timeout: Duration::from_secs(model_list_timeout_seconds),
+            auth_token_ttl: chrono::Duration::days(auth_token_days),
             tools: ChatToolsConfig {
                 search_provider,
                 search_timeout: Duration::from_secs(web_search_timeout_seconds),

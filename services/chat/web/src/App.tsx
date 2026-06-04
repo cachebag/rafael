@@ -1,19 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  clearStoredAuthToken,
   createConversation,
   deleteConversation,
+  getCurrentUser,
   getConversation,
   getState,
+  getStoredAuthToken,
+  login,
   purgeConversations,
+  register,
+  setStoredAuthToken,
   streamMessage,
   updateConversation,
   updateSettings
 } from "./api";
+import { AuthPanel } from "./components/AuthPanel";
 import { ChatPanel } from "./components/ChatPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { Sidebar } from "./components/Sidebar";
 import { applyTheme } from "./themes";
 import type {
+  AuthSession,
+  AuthUser,
   ChatMessageRecord,
   ChatState,
   Conversation,
@@ -24,6 +33,7 @@ import type {
 type LoadState = "idle" | "loading" | "ready" | "failed";
 
 export default function App() {
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [state, setState] = useState<ChatState | null>(null);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
@@ -34,6 +44,7 @@ export default function App() {
   const [loading, setLoading] = useState<LoadState>("idle");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [toolActivity, setToolActivity] = useState<ToolActivity | null>(null);
   const sidebarOpenFrameRef = useRef<number | null>(null);
 
@@ -45,6 +56,12 @@ export default function App() {
   }, [state]);
   const activeTheme = state?.theme ?? "charcoal";
 
+  useEffect(() => {
+    if (document.documentElement.dataset.theme === undefined) {
+      applyTheme("charcoal");
+    }
+  }, []);
+
   const refreshState = useCallback(async () => {
     const nextState = await getState();
     setState(nextState);
@@ -54,21 +71,40 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    setLoading("loading");
-    refreshState()
-      .then(() => {
+
+    async function bootstrap(): Promise<void> {
+      setLoading("loading");
+      if (getStoredAuthToken() === null) {
         if (!active) {
           return;
         }
         setLoading("ready");
-      })
-      .catch((cause: unknown) => {
+        return;
+      }
+
+      try {
+        const currentUser = await getCurrentUser();
         if (!active) {
           return;
         }
-        setError(cause instanceof Error ? cause.message : "failed to load chat");
-        setLoading("failed");
-      });
+        setUser(currentUser);
+        await refreshState();
+        if (active) {
+          setLoading("ready");
+        }
+      } catch {
+        clearStoredAuthToken();
+        if (active) {
+          setUser(null);
+          setState(null);
+          setConversation(null);
+          setSelectedConversationId(null);
+          setLoading("ready");
+        }
+      }
+    }
+
+    void bootstrap();
 
     return () => {
       active = false;
@@ -323,6 +359,68 @@ export default function App() {
     }
   }
 
+  async function startSession(session: AuthSession): Promise<void> {
+    setStoredAuthToken(session.token);
+    setUser(session.user);
+    setAuthError(null);
+    setError(null);
+    const nextState = await refreshState();
+    setState(nextState);
+    setConversation(null);
+    setSelectedConversationId(null);
+  }
+
+  async function handleLogin(username: string, password: string): Promise<void> {
+    setBusy(true);
+    setAuthError(null);
+    try {
+      await startSession(await login(username, password));
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "failed to sign in";
+      setAuthError(message);
+      throw cause;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRegister(username: string, password: string): Promise<void> {
+    setBusy(true);
+    setAuthError(null);
+    try {
+      await startSession(await register(username, password));
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "failed to register";
+      setAuthError(message);
+      throw cause;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleLogout(): void {
+    clearStoredAuthToken();
+    setUser(null);
+    setState(null);
+    setConversation(null);
+    setSelectedConversationId(null);
+    setSettingsOpen(false);
+    setError(null);
+    setAuthError(null);
+    setToolActivity(null);
+  }
+
+  if (user === null) {
+    return (
+      <AuthPanel
+        busy={busy || loading === "loading"}
+        error={authError}
+        onLogin={handleLogin}
+        onRegister={handleRegister}
+      />
+    );
+  }
+
   return (
     <main className="app-shell min-h-dvh text-[var(--text)]">
       <div
@@ -382,6 +480,7 @@ export default function App() {
         <SettingsPanel
           providers={state.providers}
           activeProviderId={state.activeProviderId}
+          user={user}
           conversationCount={state.conversations.length}
           busy={busy}
           theme={state.theme}
@@ -389,6 +488,7 @@ export default function App() {
           onProviderChange={handleProviderChange}
           onThemeChange={handleThemeChange}
           onPurgeConversations={handlePurgeConversations}
+          onLogout={handleLogout}
         />
       ) : null}
     </main>
