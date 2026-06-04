@@ -2,6 +2,7 @@ mod config;
 mod model;
 mod server;
 mod store;
+mod tools;
 mod types;
 
 use clap::{Parser, Subcommand};
@@ -39,6 +40,7 @@ async fn main() -> anyhow::Result<()> {
                 default_provider = %config.default_provider.id,
                 default_model = %config.default_provider.model,
                 model_list_timeout_seconds = config.model_list_timeout.as_secs(),
+                web_tools_enabled = config.tools.enabled(),
                 "configuration loaded"
             );
             Ok(())
