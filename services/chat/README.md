@@ -37,6 +37,7 @@ RAFAEL_CHAT_MODEL_API_KEY=
 RAFAEL_CHAT_MODEL_TIMEOUT_SECONDS=300
 RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS=5
 RAFAEL_CHAT_SYSTEM_PROMPT=
+RAFAEL_CHAT_AUTH_TOKEN_DAYS=30
 RAFAEL_CHAT_WEB_SEARCH_PROVIDER=disabled
 RAFAEL_CHAT_SEARXNG_BASE_URL=
 RAFAEL_CHAT_BRAVE_SEARCH_API_KEY=
@@ -49,8 +50,21 @@ RAFAEL_CHAT_WEB_SEARCH_FETCH_MAX_BYTES=16384
 RAFAEL_CHAT_WEB_TOOL_MAX_INVOCATIONS=4
 ```
 
-The service stores provider settings in `config.json` and conversations under
-`conversations/` inside `RAFAEL_CHAT_DATA_DIR`.
+The service stores users in `users.json`, signs JWTs with an `auth_secret` file,
+and stores each user's chat config/conversations under
+`users/<name>/chat/` inside `RAFAEL_CHAT_DATA_DIR`.
+
+Registration is limited to this case-insensitive first-name allowlist:
+
+```txt
+Akrm
+Nowar
+Sofia
+```
+
+Legacy pre-auth `config.json` and `conversations/` data in
+`RAFAEL_CHAT_DATA_DIR` is left untouched, but authenticated users use their own
+per-user chat directories.
 
 For the local llama-swap endpoint, the service reads
 `RAFAEL_CHAT_MODEL_BASE_URL/models` and uses that response as the model dropdown.

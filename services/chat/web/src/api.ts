@@ -1,4 +1,6 @@
 import type {
+  AuthSession,
+  AuthUser,
   ChatState,
   Conversation,
   PublicProvider,
@@ -14,6 +16,47 @@ type JsonValue =
   | null
   | JsonValue[]
   | { [key: string]: JsonValue | undefined };
+
+const AUTH_TOKEN_STORAGE_KEY = "rafael.chat.authToken";
+
+let authToken =
+  typeof window === "undefined"
+    ? null
+    : window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+
+export function getStoredAuthToken(): string | null {
+  return authToken;
+}
+
+export function setStoredAuthToken(token: string): void {
+  authToken = token;
+  window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+}
+
+export function clearStoredAuthToken(): void {
+  authToken = null;
+  window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+}
+
+export async function register(username: string, password: string): Promise<AuthSession> {
+  return request<AuthSession>("/api/auth/register", {
+    method: "POST",
+    body: { username, password },
+    auth: false
+  });
+}
+
+export async function login(username: string, password: string): Promise<AuthSession> {
+  return request<AuthSession>("/api/auth/login", {
+    method: "POST",
+    body: { username, password },
+    auth: false
+  });
+}
+
+export async function getCurrentUser(): Promise<AuthUser> {
+  return request<AuthUser>("/api/auth/me");
+}
 
 export async function getState(): Promise<ChatState> {
   return request<ChatState>("/api/state");
@@ -83,6 +126,7 @@ export async function streamMessage(
     {
       method: "POST",
       headers: {
+        ...authHeaders(),
         "Content-Type": "application/json"
       },
       body: JSON.stringify({ content, providerId })
@@ -211,16 +255,19 @@ export async function updateSettings(
 
 async function request<T>(
   path: string,
-  options: { method?: string; body?: JsonValue } = {}
+  options: { method?: string; body?: JsonValue; auth?: boolean } = {}
 ): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (options.auth !== false) {
+    Object.assign(headers, authHeaders());
+  }
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+
   const response = await fetch(path, {
     method: options.method ?? "GET",
-    headers:
-      options.body === undefined
-        ? undefined
-        : {
-            "Content-Type": "application/json"
-          },
+    headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body)
   });
 
@@ -234,6 +281,10 @@ async function request<T>(
   }
 
   return (await response.json()) as T;
+}
+
+function authHeaders(): Record<string, string> {
+  return authToken === null ? {} : { Authorization: `Bearer ${authToken}` };
 }
 
 async function readError(response: Response): Promise<string> {

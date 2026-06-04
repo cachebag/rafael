@@ -5,12 +5,15 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.102"
+argon2 = "0.5.3"
 axum = { version = "0.8.9", features = ["macros"] }
 chrono = { version = "0.4.44", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4.6.1", features = ["derive"] }
 client = { path = "../../crates/client" }
 common = { path = "../../crates/common" }
 config = { path = "../../crates/config" }
+jsonwebtoken = "10.4.0"
+rand_core = { version = "0.6.4", features = ["std"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 tool-registry = { path = "../../crates/tool-registry" }

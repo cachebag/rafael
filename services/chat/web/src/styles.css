@@ -408,6 +408,89 @@ input:disabled {
   color: var(--text);
 }
 
+.auth-shell {
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  padding: 1rem;
+}
+
+.auth-panel {
+  display: grid;
+  width: min(100%, 24rem);
+  gap: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 92%, var(--bg) 8%);
+  box-shadow: var(--shadow-soft);
+  padding: 1rem;
+}
+
+.auth-brand {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.auth-brand h1 {
+  font-size: 1.125rem;
+  font-weight: 650;
+}
+
+.auth-kicker {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.auth-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  padding: 0.25rem;
+}
+
+.auth-mode-switch button {
+  min-height: 2rem;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.auth-mode-switch button:hover:not(:disabled),
+.auth-mode-switch .auth-mode-active {
+  background: var(--panel-strong);
+  color: var(--text);
+}
+
+.auth-form {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.auth-note {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.auth-error {
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  padding: 0.65rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.auth-submit {
+  min-height: 2.5rem;
+}
+
 .settings-overlay {
   position: fixed;
   inset: 0;
@@ -495,6 +578,35 @@ input:disabled {
   color: var(--text);
   padding: 0.625rem 0.75rem;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-account-row {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.settings-account-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.9375rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-account-copy {
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.settings-logout-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
   white-space: nowrap;
 }
 
@@ -1240,6 +1352,11 @@ input:disabled {
   .settings-danger-layout {
     grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
     align-items: end;
+  }
+
+  .settings-account-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
   }
 
   .settings-danger-controls {
