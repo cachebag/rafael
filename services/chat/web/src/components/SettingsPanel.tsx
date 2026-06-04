@@ -187,8 +187,8 @@ export function SettingsPanel({
             <h3 className="settings-section-title">Account</h3>
             <div className="settings-account-row">
               <div className="min-w-0">
-                <p className="settings-account-name">{user.username}</p>
-                <p className="settings-account-copy">Signed in on this browser.</p>
+                <p className="settings-account-name">{user.firstName}</p>
+                <p className="settings-account-copy">@{user.username} · signed in on this browser.</p>
               </div>
               <button
                 type="button"

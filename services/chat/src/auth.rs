@@ -17,7 +17,8 @@ use tokio::io::AsyncWriteExt;
 use crate::store::ChatStore;
 use crate::types::PublicUser;
 
-const ALLOWED_USERS: &[(&str, &str)] = &[("akrm", "Akrm"), ("nowar", "Nowar"), ("sofia", "Sofia")];
+const ALLOWED_FIRST_NAMES: &[(&str, &str)] =
+    &[("akrm", "Akrm"), ("nowar", "Nowar"), ("sofia", "Sofia")];
 const MIN_PASSWORD_LEN: usize = 8;
 
 #[derive(Debug, Clone)]
@@ -44,23 +45,29 @@ impl AuthStore {
     pub async fn register(
         &self,
         username: &str,
+        first_name: &str,
         password: &str,
     ) -> Result<AuthSession, AuthFailure> {
-        let allowed = allowed_user(username).ok_or(AuthFailure::NotAllowed)?;
+        let username = normalize_username(username);
+        if username.is_empty() {
+            return Err(AuthFailure::InvalidUsername);
+        }
+        let allowed = allowed_first_name(first_name).ok_or(AuthFailure::NotAllowed)?;
         validate_password(password)?;
         let mut users = self.load_users().await?;
         if users
             .users
             .iter()
-            .any(|user| user.id.eq_ignore_ascii_case(allowed.id))
+            .any(|user| normalize_username(&user.username) == username)
         {
             return Err(AuthFailure::AlreadyRegistered);
         }
 
         let password_hash = hash_password(password)?;
         let user = StoredUser {
-            id: allowed.id.to_owned(),
-            username: allowed.username.to_owned(),
+            id: unique_user_id(&username, &users.users),
+            username,
+            first_name: allowed.first_name.to_owned(),
             password_hash,
             created_at: Utc::now(),
         };
@@ -73,12 +80,12 @@ impl AuthStore {
     }
 
     pub async fn login(&self, username: &str, password: &str) -> Result<AuthSession, AuthFailure> {
-        let allowed = allowed_user(username).ok_or(AuthFailure::InvalidCredentials)?;
+        let username = normalize_username(username);
         let users = self.load_users().await?;
         let user = users
             .users
             .into_iter()
-            .find(|user| user.id == allowed.id)
+            .find(|user| normalize_username(&user.username) == username)
             .ok_or(AuthFailure::InvalidCredentials)?;
         verify_password(password, &user.password_hash)?;
         self.session_for(user).map_err(AuthFailure::from)
@@ -92,10 +99,24 @@ impl AuthStore {
             &DecodingKey::from_secret(self.token_secret.as_bytes()),
             &validation,
         )?;
-        let allowed = allowed_user(&data.claims.sub).ok_or(AuthFailure::InvalidToken)?;
+        let username = if data.claims.username.trim().is_empty() {
+            normalize_username(&data.claims.sub)
+        } else {
+            normalize_username(&data.claims.username)
+        };
+        let first_name = if data.claims.first_name.trim().is_empty() {
+            display_first_name(&username)
+        } else {
+            display_first_name(&data.claims.first_name)
+        };
+        if username.is_empty() || first_name.is_empty() {
+            return Err(AuthFailure::InvalidToken);
+        }
+
         Ok(PublicUser {
-            id: allowed.id.to_owned(),
-            username: allowed.username.to_owned(),
+            id: data.claims.sub,
+            username,
+            first_name,
         })
     }
 
@@ -112,7 +133,8 @@ impl AuthStore {
             &Header::new(Algorithm::HS256),
             &Claims {
                 sub: user.id.clone(),
-                name: user.username.clone(),
+                username: user.username.clone(),
+                first_name: user.first_name.clone(),
                 iat: now.timestamp() as usize,
                 exp: exp.timestamp() as usize,
             },
@@ -120,11 +142,13 @@ impl AuthStore {
         )
         .context("failed to sign auth token")?;
 
+        let first_name = user_display_first_name(&user);
         Ok(AuthSession {
             token,
             user: PublicUser {
                 id: user.id,
                 username: user.username,
+                first_name,
             },
         })
     }
@@ -158,6 +182,7 @@ pub struct AuthSession {
 pub enum AuthFailure {
     NotAllowed,
     AlreadyRegistered,
+    InvalidUsername,
     InvalidCredentials,
     InvalidToken,
     WeakPassword,
@@ -167,8 +192,9 @@ pub enum AuthFailure {
 impl AuthFailure {
     pub fn user_message(&self) -> &'static str {
         match self {
-            Self::NotAllowed => "that username is not allowed to register",
-            Self::AlreadyRegistered => "that user is already registered",
+            Self::NotAllowed => "that first name is not allowed to register",
+            Self::AlreadyRegistered => "that username is already registered",
+            Self::InvalidUsername => "username is required",
             Self::InvalidCredentials => "invalid username or password",
             Self::InvalidToken => "invalid or expired session",
             Self::WeakPassword => "password must be at least 8 characters",
@@ -196,20 +222,67 @@ impl From<jsonwebtoken::errors::Error> for AuthFailure {
 
 #[derive(Debug, Clone, Copy)]
 struct AllowedUser {
-    id: &'static str,
-    username: &'static str,
+    first_name: &'static str,
 }
 
-fn allowed_user(value: &str) -> Option<AllowedUser> {
-    let normalized = normalize_username(value);
-    ALLOWED_USERS
+fn allowed_first_name(value: &str) -> Option<AllowedUser> {
+    let normalized = normalize_first_name(value);
+    ALLOWED_FIRST_NAMES
         .iter()
         .find(|(id, _)| *id == normalized)
-        .map(|(id, username)| AllowedUser { id, username })
+        .map(|(_, first_name)| AllowedUser { first_name })
 }
 
 fn normalize_username(value: &str) -> String {
     value.trim().to_ascii_lowercase()
+}
+
+fn normalize_first_name(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn display_first_name(value: &str) -> String {
+    value.trim().to_owned()
+}
+
+fn user_display_first_name(user: &StoredUser) -> String {
+    let first_name = user.first_name.trim();
+    if first_name.is_empty() {
+        user.username.clone()
+    } else {
+        first_name.to_owned()
+    }
+}
+
+fn unique_user_id(username: &str, users: &[StoredUser]) -> String {
+    let base = sanitize_user_id(username);
+    if !users.iter().any(|user| user.id == base) {
+        return base;
+    }
+
+    let mut index = 2;
+    loop {
+        let candidate = format!("{base}-{index}");
+        if !users.iter().any(|user| user.id == candidate) {
+            return candidate;
+        }
+        index += 1;
+    }
+}
+
+fn sanitize_user_id(username: &str) -> String {
+    let mut id = String::with_capacity(username.len());
+    for ch in username.chars() {
+        if ch.is_ascii_alphanumeric() {
+            id.push(ch.to_ascii_lowercase());
+        } else if matches!(ch, '-' | '_' | '.') {
+            id.push(ch);
+        } else {
+            id.push('-');
+        }
+    }
+    let id = id.trim_matches(['-', '.', '_']).to_owned();
+    if id.is_empty() { "user".to_owned() } else { id }
 }
 
 fn validate_password(password: &str) -> Result<(), AuthFailure> {
@@ -296,14 +369,23 @@ struct UserFile {
 struct StoredUser {
     id: String,
     username: String,
+    #[serde(default = "legacy_first_name")]
+    first_name: String,
     password_hash: String,
     created_at: chrono::DateTime<Utc>,
+}
+
+fn legacy_first_name() -> String {
+    String::new()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Claims {
     sub: String,
-    name: String,
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    first_name: String,
     iat: usize,
     exp: usize,
 }

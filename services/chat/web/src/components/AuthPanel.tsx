@@ -7,15 +7,20 @@ interface AuthPanelProps {
   busy: boolean;
   error: string | null;
   onLogin: (username: string, password: string) => Promise<void>;
-  onRegister: (username: string, password: string) => Promise<void>;
+  onRegister: (username: string, firstName: string, password: string) => Promise<void>;
 }
 
 export function AuthPanel({ busy, error, onLogin, onRegister }: AuthPanelProps) {
   const [mode, setMode] = useState<AuthMode>("login");
   const [username, setUsername] = useState("");
+  const [firstName, setFirstName] = useState("");
   const [password, setPassword] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
-  const canSubmit = username.trim() !== "" && password !== "" && !busy;
+  const canSubmit =
+    username.trim() !== "" &&
+    password !== "" &&
+    (mode === "login" || firstName.trim() !== "") &&
+    !busy;
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -28,7 +33,7 @@ export function AuthPanel({ busy, error, onLogin, onRegister }: AuthPanelProps) 
       if (mode === "login") {
         await onLogin(username, password);
       } else {
-        await onRegister(username, password);
+        await onRegister(username, firstName, password);
       }
     } catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : "authentication failed");
@@ -73,11 +78,25 @@ export function AuthPanel({ busy, error, onLogin, onRegister }: AuthPanelProps) 
               className="control"
               value={username}
               autoComplete="username"
-              placeholder="Akrm"
+              placeholder="username"
               disabled={busy}
               onChange={(event) => setUsername(event.target.value)}
             />
           </label>
+
+          {mode === "register" ? (
+            <label className="grid gap-2">
+              <span className="control-label">First name</span>
+              <input
+                className="control"
+                value={firstName}
+                autoComplete="given-name"
+                placeholder="Akrm"
+                disabled={busy}
+                onChange={(event) => setFirstName(event.target.value)}
+              />
+            </label>
+          ) : null}
 
           <label className="grid gap-2">
             <span className="control-label">Password</span>

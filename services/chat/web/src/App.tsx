@@ -384,11 +384,15 @@ export default function App() {
     }
   }
 
-  async function handleRegister(username: string, password: string): Promise<void> {
+  async function handleRegister(
+    username: string,
+    firstName: string,
+    password: string
+  ): Promise<void> {
     setBusy(true);
     setAuthError(null);
     try {
-      await startSession(await register(username, password));
+      await startSession(await register(username, firstName, password));
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "failed to register";
       setAuthError(message);
