@@ -29,9 +29,9 @@ use crate::{
     store::{ChatStore, clean_optional, new_id},
     tools::ChatToolRuntime,
     types::{
-        AuthRequest, AuthSessionResponse, ChatConfigFile, ChatMessageRecord, ChatRole,
-        ChatStateResponse, Conversation, CreateConversationRequest, ProviderKind, PublicProvider,
-        PublicUser, SaveProviderRequest, SendMessageRequest, StoredProvider,
+        AuthSessionResponse, ChatConfigFile, ChatMessageRecord, ChatRole, ChatStateResponse,
+        Conversation, CreateConversationRequest, LoginRequest, ProviderKind, PublicProvider,
+        PublicUser, RegisterRequest, SaveProviderRequest, SendMessageRequest, StoredProvider,
         UpdateConversationRequest, UpdateSettingsRequest,
     },
 };
@@ -102,19 +102,19 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
 
 async fn register_user(
     State(state): State<ServerState>,
-    Json(request): Json<AuthRequest>,
+    Json(request): Json<RegisterRequest>,
 ) -> Result<Json<AuthSessionResponse>, ApiError> {
     let _guard = state.writes.lock().await;
     let session = state
         .auth
-        .register(&request.username, &request.password)
+        .register(&request.username, &request.first_name, &request.password)
         .await?;
     Ok(Json(auth_session_response(session)))
 }
 
 async fn login_user(
     State(state): State<ServerState>,
-    Json(request): Json<AuthRequest>,
+    Json(request): Json<LoginRequest>,
 ) -> Result<Json<AuthSessionResponse>, ApiError> {
     let session = state
         .auth
@@ -781,7 +781,7 @@ impl ApiError {
 impl From<AuthFailure> for ApiError {
     fn from(error: AuthFailure) -> Self {
         match error {
-            AuthFailure::NotAllowed | AuthFailure::WeakPassword => {
+            AuthFailure::NotAllowed | AuthFailure::WeakPassword | AuthFailure::InvalidUsername => {
                 Self::bad_request(error.user_message())
             }
             AuthFailure::AlreadyRegistered => Self::conflict(error.user_message()),

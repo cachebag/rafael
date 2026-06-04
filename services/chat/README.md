@@ -54,7 +54,8 @@ The service stores users in `users.json`, signs JWTs with an `auth_secret` file,
 and stores each user's chat config/conversations under
 `users/<name>/chat/` inside `RAFAEL_CHAT_DATA_DIR`.
 
-Registration is limited to this case-insensitive first-name allowlist:
+Registration asks for username, first name, and password. Usernames are login
+handles; first names are matched against this case-insensitive allowlist:
 
 ```txt
 Akrm
@@ -64,7 +65,7 @@ Sofia
 
 Legacy pre-auth `config.json` and `conversations/` data in
 `RAFAEL_CHAT_DATA_DIR` is left untouched, but authenticated users use their own
-per-user chat directories.
+per-user chat directories keyed by username.
 
 For the local llama-swap endpoint, the service reads
 `RAFAEL_CHAT_MODEL_BASE_URL/models` and uses that response as the model dropdown.

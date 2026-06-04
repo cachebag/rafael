@@ -7,6 +7,7 @@ export type ChatRole = "user" | "assistant" | "system";
 export interface AuthUser {
   id: string;
   username: string;
+  firstName: string;
 }
 
 export interface AuthSession {

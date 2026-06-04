@@ -6,13 +6,22 @@ use serde::{Deserialize, Serialize};
 pub struct PublicUser {
     pub id: String,
     pub username: String,
+    pub first_name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AuthRequest {
+pub struct LoginRequest {
     pub username: String,
     pub password: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterRequest {
+    pub username: String,
+    pub password: String,
+    pub first_name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

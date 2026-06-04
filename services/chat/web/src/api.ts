@@ -38,10 +38,14 @@ export function clearStoredAuthToken(): void {
   window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
 }
 
-export async function register(username: string, password: string): Promise<AuthSession> {
+export async function register(
+  username: string,
+  firstName: string,
+  password: string
+): Promise<AuthSession> {
   return request<AuthSession>("/api/auth/register", {
     method: "POST",
-    body: { username, password },
+    body: { username, firstName, password },
     auth: false
   });
 }

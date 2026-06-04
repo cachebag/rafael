@@ -148,10 +148,11 @@ The chat backend calls `RAFAEL_CHAT_MODEL_BASE_URL/models` and uses that respons
 as the local model dropdown. If the model list is unavailable, it falls back to
 saved providers in the authenticated user's chat config.
 
-Chat requires login. Users register with an allowed first name and password;
-allowed names are `Akrm`, `Nowar`, and `Sofia`, matched case-insensitively. JWTs
-are signed with `RAFAEL_CHAT_DATA_DIR/auth_secret`, default to 30 days, and each
-user gets isolated chat state under `RAFAEL_CHAT_DATA_DIR/users/<name>/chat/`.
+Chat requires login. Users register with a username, password, and allowed first
+name; allowed names are `Akrm`, `Nowar`, and `Sofia`, matched
+case-insensitively. JWTs are signed with `RAFAEL_CHAT_DATA_DIR/auth_secret`,
+default to 30 days, and each user gets isolated chat state under
+`RAFAEL_CHAT_DATA_DIR/users/<username>/chat/`.
 
 Chat web tools are disabled until a provider is configured in a drop-in:
 
