@@ -6,11 +6,13 @@ use std::{
 use anyhow::{Context, bail};
 use argon2::{
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
-    password_hash::{SaltString, rand_core::OsRng},
+    password_hash::{
+        SaltString,
+        rand_core::{OsRng, RngCore},
+    },
 };
 use chrono::{Duration, Utc};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
-use rand_core::RngCore;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::AsyncWriteExt;
 
