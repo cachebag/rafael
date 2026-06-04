@@ -36,6 +36,12 @@ export async function deleteConversation(id: string): Promise<void> {
   });
 }
 
+export async function purgeConversations(): Promise<ChatState> {
+  return request<ChatState>("/api/conversations", {
+    method: "DELETE"
+  });
+}
+
 export async function updateConversation(
   id: string,
   updates: { pinned?: boolean }

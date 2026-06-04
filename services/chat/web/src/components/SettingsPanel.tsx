@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ReactNode, SelectHTMLAttributes } from "react";
-import { ChevronDown, Moon, Sun, X } from "lucide-react";
+import { ChevronDown, Moon, Sun, Trash2, X } from "lucide-react";
 import { compactModelName } from "../display";
 import {
   composeTheme,
@@ -15,26 +15,35 @@ import type { PublicProvider, ThemeName } from "../types";
 interface SettingsPanelProps {
   providers: PublicProvider[];
   activeProviderId: string;
+  conversationCount: number;
+  busy: boolean;
   theme: ThemeName;
   onClose: () => void;
   onProviderChange: (id: string) => Promise<void>;
   onThemeChange: (theme: ThemeName) => Promise<void>;
+  onPurgeConversations: () => Promise<void>;
 }
 
 export function SettingsPanel({
   providers,
   activeProviderId,
+  conversationCount,
+  busy,
   theme,
   onClose,
   onProviderChange,
-  onThemeChange
+  onThemeChange,
+  onPurgeConversations
 }: SettingsPanelProps) {
   const activeProvider =
     providers.find((provider) => provider.id === activeProviderId) ?? providers[0];
   const [saving, setSaving] = useState(false);
+  const [purgeConfirm, setPurgeConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const mode = themeMode(theme);
   const switchToMode = mode === "dark" ? "light" : "dark";
+  const purgeReady = purgeConfirm.trim() === "PURGE";
+  const controlsDisabled = saving || busy;
 
   async function updateActiveProvider(providerId: string): Promise<void> {
     setSaving(true);
@@ -55,6 +64,23 @@ export function SettingsPanel({
       await onThemeChange(themeName);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "failed to update theme");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function purgeChats(): Promise<void> {
+    if (!purgeReady || conversationCount === 0) {
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      await onPurgeConversations();
+      setPurgeConfirm("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "failed to purge chats");
     } finally {
       setSaving(false);
     }
@@ -92,7 +118,7 @@ export function SettingsPanel({
               <Field label="Active model">
                 <SelectControl
                   value={activeProviderId}
-                  disabled={saving || providers.length === 0}
+                  disabled={controlsDisabled || providers.length === 0}
                   onChange={(event) => void updateActiveProvider(event.target.value)}
                 >
                   {providers.length === 0 ? <option value="">No providers</option> : null}
@@ -107,7 +133,7 @@ export function SettingsPanel({
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                   <SelectControl
                     value={themeBase(theme)}
-                    disabled={saving}
+                    disabled={controlsDisabled}
                     onChange={(event) =>
                       void updateTheme(
                         composeTheme(event.target.value as ThemeBaseName, mode)
@@ -123,7 +149,7 @@ export function SettingsPanel({
                   <button
                     type="button"
                     className="theme-mode-button"
-                    disabled={saving}
+                    disabled={controlsDisabled}
                     title={`Switch to ${switchToMode} mode`}
                     onClick={() => void updateTheme(toggledTheme(theme))}
                   >
@@ -151,6 +177,37 @@ export function SettingsPanel({
             ) : (
               <p className="text-sm text-[var(--muted)]">No model selected.</p>
             )}
+          </section>
+
+          <section className="settings-section settings-danger-section">
+            <h3 className="settings-section-title">Danger zone</h3>
+            <div className="settings-danger-layout">
+              <div className="min-w-0">
+                <p className="settings-danger-title">Purge all chats</p>
+                <p className="settings-danger-copy">
+                  {conversationCountLabel(conversationCount)}. Type PURGE to confirm.
+                </p>
+              </div>
+              <div className="settings-danger-controls">
+                <input
+                  className="control settings-danger-input"
+                  value={purgeConfirm}
+                  placeholder="PURGE"
+                  disabled={controlsDisabled || conversationCount === 0}
+                  spellCheck={false}
+                  onChange={(event) => setPurgeConfirm(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="button-danger"
+                  disabled={controlsDisabled || conversationCount === 0 || !purgeReady}
+                  onClick={() => void purgeChats()}
+                >
+                  <Trash2 aria-hidden="true" size={15} strokeWidth={2.1} />
+                  Purge chats
+                </button>
+              </div>
+            </div>
           </section>
 
           {error !== null ? (
@@ -217,4 +274,8 @@ function providerKindLabel(provider: PublicProvider): string {
     return "OpenAI compatible";
   }
   return "Anthropic";
+}
+
+function conversationCountLabel(count: number): string {
+  return count === 1 ? "1 saved conversation" : `${count} saved conversations`;
 }
