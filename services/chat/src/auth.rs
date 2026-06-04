@@ -434,3 +434,41 @@ fn is_not_found(err: &anyhow::Error) -> bool {
             .is_some_and(|source| source.kind() == std::io::ErrorKind::NotFound)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn register_returns_token_that_verifies() {
+        let data_dir = unique_test_dir("register-token");
+        let auth = AuthStore::new(&data_dir, Duration::minutes(5))
+            .await
+            .expect("create auth store");
+
+        let session = auth
+            .register("cachebag", "Akrm", "correct horse")
+            .await
+            .expect("register user");
+        let verified = auth.verify_token(&session.token).expect("verify token");
+
+        assert_eq!(verified.id, session.user.id);
+        assert_eq!(verified.username, "cachebag");
+        assert_eq!(verified.first_name, "Akrm");
+
+        let _ = tokio::fs::remove_dir_all(data_dir).await;
+    }
+
+    fn unique_test_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "rafael-chat-auth-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+}
