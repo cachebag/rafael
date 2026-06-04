@@ -138,11 +138,34 @@ RAFAEL_CHAT_MODEL_BASE_URL=http://rafael:8080/v1
 RAFAEL_CHAT_MODEL_NAME=gemma-everyday
 RAFAEL_CHAT_MODEL_TIMEOUT_SECONDS=300
 RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS=5
+RAFAEL_CHAT_WEB_SEARCH_PROVIDER=disabled
 ```
 
 The chat backend calls `RAFAEL_CHAT_MODEL_BASE_URL/models` and uses that response
 as the local model dropdown. If the model list is unavailable, it falls back to
 saved providers in `RAFAEL_CHAT_DATA_DIR/config.json`.
+
+Chat web tools are disabled until a provider is configured in a drop-in:
+
+```bash
+systemctl --user edit rafael-chat
+```
+
+SearXNG:
+
+```ini
+[Service]
+Environment=RAFAEL_CHAT_WEB_SEARCH_PROVIDER=searxng
+Environment=RAFAEL_CHAT_SEARXNG_BASE_URL=http://127.0.0.1:8888/
+```
+
+Brave Search:
+
+```ini
+[Service]
+Environment=RAFAEL_CHAT_WEB_SEARCH_PROVIDER=brave
+Environment=RAFAEL_CHAT_BRAVE_SEARCH_API_KEY=...
+```
 
 Build the frontend and release binary before starting the unit:
 

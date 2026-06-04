@@ -10,6 +10,14 @@
 #   Environment=RAFAEL_CHAT_MODEL_BASE_URL=http://rafael:8080/v1
 #   Environment=RAFAEL_CHAT_MODEL_NAME=gemma-everyday
 #   Environment=RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS=5
+#   Environment=RAFAEL_CHAT_WEB_SEARCH_PROVIDER=searxng
+#   Environment=RAFAEL_CHAT_SEARXNG_BASE_URL=http://127.0.0.1:8888/
+#
+# Or for Brave Search:
+#
+#   [Service]
+#   Environment=RAFAEL_CHAT_WEB_SEARCH_PROVIDER=brave
+#   Environment=RAFAEL_CHAT_BRAVE_SEARCH_API_KEY=...
 #
 # Or run: systemctl --user edit rafael-chat
 #
