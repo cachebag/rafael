@@ -75,6 +75,9 @@ RAFAEL_CHAT_WEB_SEARCH_PROVIDER=searxng
 RAFAEL_CHAT_SEARXNG_BASE_URL=http://127.0.0.1:8888/
 ```
 
+The local SearXNG Docker Compose stack is documented in
+`../../infra/docker/searxng`.
+
 Or enable Brave Search:
 
 ```sh

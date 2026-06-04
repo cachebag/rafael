@@ -9,6 +9,7 @@ rafael is both my workstation and the name for this monorepo with all the variou
 ```txt
 crates/          shared Rust crates
 services/        runnable services and CLIs
+infra/docker/    Docker Compose stacks for external dependencies
 infra/systemd/   systemd service definitions
 ```
 
@@ -18,6 +19,7 @@ The active pieces right now are:
 
 - `services/coding`: the GitHub App coding worker.
 - `services/chat`: the local model chat interface.
+- `infra/docker/searxng`: the local SearXNG search backend for chat web search.
 - `infra/systemd/llama-swap.service`: the user systemd service for the local
   model lifecycle proxy.
 - `infra/systemd/rafael-chat.service`: the user systemd service for the chat UI.
