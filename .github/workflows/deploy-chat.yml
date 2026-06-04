@@ -8,6 +8,8 @@ on:
       - "crates/client/**"
       - "crates/common/**"
       - "crates/config/**"
+      - "crates/tool-registry/**"
+      - "crates/tools/web/**"
       - "infra/systemd/rafael-chat.service"
       - ".github/workflows/deploy-chat.yml"
   workflow_dispatch:
@@ -42,7 +44,7 @@ jobs:
           systemctl --user is-active rafael-chat
 
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3031/api/state >/dev/null; then
+            if curl -fsS http://127.0.0.1:3031/ >/dev/null; then
               exit 0
             fi
             sleep 1

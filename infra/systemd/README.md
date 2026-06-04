@@ -203,10 +203,10 @@ Follow logs:
 journalctl --user -u rafael-chat -f
 ```
 
-Confirm the chat API is answering:
+Confirm the chat UI is answering:
 
 ```bash
-curl http://127.0.0.1:3031/api/state
+curl http://127.0.0.1:3031/
 ```
 
 From Tailscale devices, use:

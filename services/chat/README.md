@@ -68,8 +68,8 @@ per-user chat directories.
 
 For the local llama-swap endpoint, the service reads
 `RAFAEL_CHAT_MODEL_BASE_URL/models` and uses that response as the model dropdown.
-If the endpoint is unavailable, saved providers in `config.json` are used as a
-fallback.
+If the endpoint is unavailable, saved providers in the authenticated user's
+`config.json` are used as a fallback.
 
 ## Web Tools
 
