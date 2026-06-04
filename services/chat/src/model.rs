@@ -21,19 +21,22 @@ pub async fn complete_chat(
     }
 }
 
-pub async fn stream_chat<F>(
+pub async fn stream_chat<F, G>(
     provider: &StoredProvider,
     messages: &[ChatMessageRecord],
     timeout: Duration,
     tools: Option<&ChatToolRuntime>,
     on_delta: F,
+    on_tool: G,
 ) -> anyhow::Result<String>
 where
     F: FnMut(&str),
+    G: FnMut(&str),
 {
     match provider.kind {
         ProviderKind::OpenAiCompatible => {
-            openai_compatible_stream_chat(provider, messages, timeout, tools, on_delta).await
+            openai_compatible_stream_chat(provider, messages, timeout, tools, on_delta, on_tool)
+                .await
         }
         ProviderKind::Anthropic => {
             bail!("anthropic providers can be saved but are not chat-enabled yet")
@@ -76,19 +79,21 @@ async fn openai_compatible_chat(
     Ok(response.content)
 }
 
-async fn openai_compatible_stream_chat<F>(
+async fn openai_compatible_stream_chat<F, G>(
     provider: &StoredProvider,
     messages: &[ChatMessageRecord],
     timeout: Duration,
     tools: Option<&ChatToolRuntime>,
     on_delta: F,
+    on_tool: G,
 ) -> anyhow::Result<String>
 where
     F: FnMut(&str),
+    G: FnMut(&str),
 {
     if let Some(tools) = tools.filter(|tools| tools.enabled()) {
         return openai_compatible_stream_chat_with_tools(
-            provider, messages, timeout, tools, on_delta,
+            provider, messages, timeout, tools, on_delta, on_tool,
         )
         .await;
     }
@@ -106,15 +111,17 @@ where
     Ok(response.content)
 }
 
-async fn openai_compatible_stream_chat_with_tools<F>(
+async fn openai_compatible_stream_chat_with_tools<F, G>(
     provider: &StoredProvider,
     messages: &[ChatMessageRecord],
     timeout: Duration,
     tools: &ChatToolRuntime,
     mut on_delta: F,
+    mut on_tool: G,
 ) -> anyhow::Result<String>
 where
     F: FnMut(&str),
+    G: FnMut(&str),
 {
     let client = LocalModelClient::new(model_client_config(provider, timeout))
         .context("failed to create model client")?;
@@ -140,6 +147,7 @@ where
             response.tool_calls.clone(),
         ));
         for tool_call in response.tool_calls {
+            on_tool(&tool_call.function.name);
             let result = tools.invoke(&tool_call).await;
             request_messages.push(ChatMessage::tool_result(tool_call.id, result));
         }

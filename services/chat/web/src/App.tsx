@@ -16,6 +16,7 @@ import type {
   ChatMessageRecord,
   ChatState,
   Conversation,
+  ToolActivity,
   ThemeName
 } from "./types";
 
@@ -32,6 +33,7 @@ export default function App() {
   const [loading, setLoading] = useState<LoadState>("idle");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toolActivity, setToolActivity] = useState<ToolActivity | null>(null);
   const sidebarOpenFrameRef = useRef<number | null>(null);
 
   const activeProvider = useMemo(() => {
@@ -188,6 +190,7 @@ export default function App() {
   async function handleSend(content: string): Promise<void> {
     setBusy(true);
     setError(null);
+    setToolActivity(null);
     let attemptedConversationId = conversation?.id ?? null;
     try {
       const currentConversation = conversation ?? (await createConversation());
@@ -205,7 +208,11 @@ export default function App() {
             setConversation(nextConversation);
             setSelectedConversationId(nextConversation.id);
           },
+          onToolActivity: (activity) => {
+            setToolActivity(activity);
+          },
           onDelta: (delta) => {
+            setToolActivity(null);
             setConversation((current) =>
               appendAssistantDelta(current, currentConversation.id, delta, activeProvider?.id)
             );
@@ -224,6 +231,7 @@ export default function App() {
         }
       }
     } finally {
+      setToolActivity(null);
       setBusy(false);
     }
   }
@@ -343,6 +351,7 @@ export default function App() {
           conversation={conversation}
           activeProvider={activeProvider}
           busy={busy}
+          toolActivity={toolActivity}
           error={error}
           loading={loading}
           sidebarCollapsed={sidebarCollapsed}

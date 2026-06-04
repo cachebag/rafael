@@ -3,6 +3,7 @@ import type {
   Conversation,
   PublicProvider,
   SaveProviderRequest,
+  ToolActivity,
   UpdateSettingsRequest
 } from "./types";
 
@@ -62,6 +63,7 @@ export async function sendMessage(
 export interface StreamMessageHandlers {
   onConversation: (conversation: Conversation) => void;
   onDelta: (content: string) => void;
+  onToolActivity: (activity: ToolActivity) => void;
 }
 
 export async function streamMessage(
@@ -174,6 +176,14 @@ function dispatchSseBlock(block: string, handlers: StreamMessageHandlers): void 
     const payload = JSON.parse(data) as { content?: unknown };
     if (typeof payload.content === "string") {
       handlers.onDelta(payload.content);
+    }
+    return;
+  }
+
+  if (eventName === "tool") {
+    const payload = JSON.parse(data) as { name?: unknown };
+    if (typeof payload.name === "string" && payload.name.trim() !== "") {
+      handlers.onToolActivity({ name: payload.name });
     }
     return;
   }

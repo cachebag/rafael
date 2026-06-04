@@ -556,6 +556,22 @@ input:disabled {
   animation-delay: 280ms;
 }
 
+.tool-activity-indicator {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.tool-activity-indicator svg {
+  flex: 0 0 auto;
+  opacity: 0.72;
+  animation: tool-activity-glow 1.8s ease-in-out infinite;
+}
+
 .message-activity {
   margin-left: 0.9rem;
   padding: 0.15rem 0 0.1rem;
@@ -572,6 +588,19 @@ input:disabled {
   28% {
     opacity: 0.92;
     transform: translateY(-0.48rem) scale(1);
+  }
+}
+
+@keyframes tool-activity-glow {
+  0%,
+  100% {
+    opacity: 0.48;
+    transform: translateY(0);
+  }
+
+  48% {
+    opacity: 0.9;
+    transform: translateY(-1px);
   }
 }
 

@@ -323,6 +323,11 @@ async fn stream_message_worker(
                 content: delta.to_owned(),
             });
         },
+        |tool_name| {
+            let _ = tx.send(ChatStreamEvent::Tool {
+                name: tool_name.to_owned(),
+            });
+        },
     )
     .await?;
 
@@ -680,6 +685,7 @@ struct ErrorResponse {
 enum ChatStreamEvent {
     Conversation { conversation: Conversation },
     Delta { content: String },
+    Tool { name: String },
     Done,
     Error { error: String },
 }
@@ -690,6 +696,7 @@ fn stream_event(message: ChatStreamEvent) -> Event {
             json_stream_event("conversation", &conversation)
         }
         ChatStreamEvent::Delta { content } => json_stream_event("delta", &DeltaEvent { content }),
+        ChatStreamEvent::Tool { name } => json_stream_event("tool", &ToolEvent { name }),
         ChatStreamEvent::Done => json_stream_event("done", &DoneEvent { done: true }),
         ChatStreamEvent::Error { error } => json_stream_event("error", &ErrorResponse { error }),
     }
@@ -710,6 +717,11 @@ where
 #[derive(Debug, Serialize)]
 struct DeltaEvent {
     content: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ToolEvent {
+    name: String,
 }
 
 #[derive(Debug, Serialize)]

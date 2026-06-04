@@ -1,3 +1,5 @@
+import { Globe2 } from "lucide-react";
+
 interface ActivityIndicatorProps {
   label?: string;
   compact?: boolean;
@@ -22,6 +24,19 @@ export function ActivityIndicator({
         <span />
         <span />
       </span>
+    </div>
+  );
+}
+
+interface ToolActivityIndicatorProps {
+  label: string;
+}
+
+export function ToolActivityIndicator({ label }: ToolActivityIndicatorProps) {
+  return (
+    <div className="tool-activity-indicator" role="status" aria-live="polite">
+      <Globe2 aria-hidden="true" size={15} strokeWidth={1.9} />
+      <span>{label}</span>
     </div>
   );
 }
