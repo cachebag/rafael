@@ -26,6 +26,7 @@ use crate::{
     config::AppConfig,
     model,
     store::{ChatStore, clean_optional, new_id},
+    tools::ChatToolRuntime,
     types::{
         ChatConfigFile, ChatMessageRecord, ChatRole, ChatStateResponse, Conversation,
         CreateConversationRequest, ProviderKind, PublicProvider, SaveProviderRequest,
@@ -38,6 +39,7 @@ struct ServerState {
     config: AppConfig,
     store: ChatStore,
     writes: Arc<Mutex<()>>,
+    tools: Option<ChatToolRuntime>,
 }
 
 pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
@@ -46,6 +48,11 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
         config: config.clone(),
         store,
         writes: Arc::new(Mutex::new(())),
+        tools: if config.tools.enabled() {
+            Some(ChatToolRuntime::new(config.tools.clone())?)
+        } else {
+            None
+        },
     };
 
     state
@@ -310,6 +317,7 @@ async fn stream_message_worker(
         &provider,
         &conversation.messages,
         state.config.model_timeout,
+        state.tools.as_ref(),
         |delta| {
             let _ = tx.send(ChatStreamEvent::Delta {
                 content: delta.to_owned(),
