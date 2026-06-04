@@ -13,6 +13,7 @@ members = [
   "crates/tools/docker",
   "crates/tools/tailscale",
   "crates/tools/systemd",
+  "crates/tools/web",
   "services/chat",
   "services/coding",
   "services/automation",
