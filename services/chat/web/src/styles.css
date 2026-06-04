@@ -337,6 +337,33 @@ input:disabled {
   transform: translateY(-1px);
 }
 
+.button-danger {
+  display: inline-flex;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 48%, var(--line));
+  border-radius: 6px;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  padding: 0 0.8rem;
+  font-size: 0.875rem;
+  font-weight: 650;
+  white-space: nowrap;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.button-danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger) 72%, var(--line));
+  background: color-mix(in srgb, var(--danger-bg) 78%, var(--danger) 22%);
+  transform: translateY(-1px);
+}
+
 .sidebar-settings-button {
   min-height: 2rem;
   border: 0;
@@ -469,6 +496,33 @@ input:disabled {
   padding: 0.625rem 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.settings-danger-layout {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.settings-danger-title {
+  color: var(--danger-text);
+  font-size: 0.9375rem;
+  font-weight: 650;
+}
+
+.settings-danger-copy {
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.settings-danger-controls {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.settings-danger-input {
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--line));
 }
 
 .copy-button {
@@ -1181,6 +1235,16 @@ input:disabled {
 
   .settings-grid-two {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-danger-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
+    align-items: end;
+  }
+
+  .settings-danger-controls {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
   }
 
   .settings-field-wide {

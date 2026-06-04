@@ -66,7 +66,9 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
         .route("/settings", patch(update_settings))
         .route(
             "/conversations",
-            get(list_conversations).post(create_conversation),
+            get(list_conversations)
+                .post(create_conversation)
+                .delete(delete_conversations),
         )
         .route(
             "/conversations/{id}",
@@ -169,6 +171,26 @@ async fn delete_conversation(
     } else {
         Err(ApiError::not_found("conversation not found"))
     }
+}
+
+async fn delete_conversations(
+    State(state): State<ServerState>,
+) -> Result<Json<ChatStateResponse>, ApiError> {
+    let _guard = state.writes.lock().await;
+    let deleted = state.store.delete_all_conversations().await?;
+    info!(deleted, "purged chat conversations");
+
+    let config = state.chat_config().await?;
+    let providers = state.runtime_providers(&config).await;
+    let active_provider_id =
+        active_provider_id(&config, &providers, &state.config.default_provider);
+
+    Ok(Json(ChatStateResponse {
+        providers: providers.iter().map(PublicProvider::from_stored).collect(),
+        active_provider_id,
+        theme: config.settings.theme,
+        conversations: Vec::new(),
+    }))
 }
 
 async fn send_message(

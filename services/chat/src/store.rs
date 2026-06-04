@@ -147,6 +147,50 @@ impl ChatStore {
         }
     }
 
+    pub async fn delete_all_conversations(&self) -> anyhow::Result<usize> {
+        self.ensure_dirs().await?;
+        let mut deleted = 0;
+        let mut entries = tokio::fs::read_dir(&self.conversations_dir)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to read conversations directory {}",
+                    self.conversations_dir.display()
+                )
+            })?;
+
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .context("failed to read directory entry")?
+        {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                continue;
+            }
+            if !entry
+                .file_type()
+                .await
+                .with_context(|| format!("failed to read file type for {}", path.display()))?
+                .is_file()
+            {
+                continue;
+            }
+
+            match tokio::fs::remove_file(&path).await {
+                Ok(()) => deleted += 1,
+                Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
+                Err(source) => {
+                    return Err(source).with_context(|| {
+                        format!("failed to delete conversation file {}", path.display())
+                    });
+                }
+            }
+        }
+
+        Ok(deleted)
+    }
+
     fn conversation_path(&self, id: &str) -> anyhow::Result<PathBuf> {
         let id = SafeComponent::parse(id.to_owned()).context("invalid conversation id")?;
         let path = self.conversations_dir.join(format!("{}.json", id.as_str()));

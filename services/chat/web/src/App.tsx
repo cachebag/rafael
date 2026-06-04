@@ -4,6 +4,7 @@ import {
   deleteConversation,
   getConversation,
   getState,
+  purgeConversations,
   streamMessage,
   updateConversation,
   updateSettings
@@ -304,6 +305,24 @@ export default function App() {
     }
   }
 
+  async function handlePurgeConversations(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    setToolActivity(null);
+    try {
+      const nextState = await purgeConversations();
+      setState(nextState);
+      applyTheme(nextState.theme);
+      setConversation(null);
+      setSelectedConversationId(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "failed to purge chats");
+      throw cause;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className="app-shell min-h-dvh text-[var(--text)]">
       <div
@@ -363,10 +382,13 @@ export default function App() {
         <SettingsPanel
           providers={state.providers}
           activeProviderId={state.activeProviderId}
+          conversationCount={state.conversations.length}
+          busy={busy}
           theme={state.theme}
           onClose={() => setSettingsOpen(false)}
           onProviderChange={handleProviderChange}
           onThemeChange={handleThemeChange}
+          onPurgeConversations={handlePurgeConversations}
         />
       ) : null}
     </main>
