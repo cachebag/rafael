@@ -1,17 +1,19 @@
 import { memo } from "react";
-import type { ChatMessageRecord } from "../types";
-import { ActivityIndicator } from "./ActivityIndicator";
+import type { ChatMessageRecord, ToolActivity } from "../types";
+import { ActivityIndicator, ToolActivityIndicator } from "./ActivityIndicator";
 import { LazyCopyButton } from "./LazyCopyButton";
 import { MarkdownContent } from "./MarkdownContent";
 
 interface MessageThreadProps {
   messages: ChatMessageRecord[];
   busy: boolean;
+  toolActivity: ToolActivity | null;
 }
 
 export const MessageThread = memo(function MessageThread({
   messages,
-  busy
+  busy,
+  toolActivity
 }: MessageThreadProps) {
   const showPendingResponse =
     busy && messages.length > 0 && messages.at(-1)?.role === "user";
@@ -28,7 +30,11 @@ export const MessageThread = memo(function MessageThread({
       {showPendingResponse ? (
         <article className="flex w-full min-w-0 justify-start">
           <div className="message-activity">
-            <ActivityIndicator label="Waiting for response" />
+            {toolActivity === null ? (
+              <ActivityIndicator label="Waiting for response" />
+            ) : (
+              <ToolActivityIndicator label={toolActivityLabel(toolActivity)} />
+            )}
           </div>
         </article>
       ) : null}
@@ -39,6 +45,16 @@ export const MessageThread = memo(function MessageThread({
 interface MessageBubbleProps {
   message: ChatMessageRecord;
   copyEnabled: boolean;
+}
+
+function toolActivityLabel(activity: ToolActivity): string {
+  if (activity.name === "web_search") {
+    return "searching the web...";
+  }
+  if (activity.name === "fetch_url") {
+    return "reading source...";
+  }
+  return "using tool...";
 }
 
 const MessageBubble = memo(function MessageBubble({

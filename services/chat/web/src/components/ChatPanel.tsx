@@ -4,13 +4,14 @@ import {
   compactModelName,
   providerConnectionTitle
 } from "../display";
-import type { Conversation, PublicProvider } from "../types";
+import type { Conversation, PublicProvider, ToolActivity } from "../types";
 import { MessageThread } from "./MessageThread";
 
 interface ChatPanelProps {
   conversation: Conversation | null;
   activeProvider: PublicProvider | null;
   busy: boolean;
+  toolActivity: ToolActivity | null;
   error: string | null;
   loading: "idle" | "loading" | "ready" | "failed";
   sidebarCollapsed: boolean;
@@ -22,6 +23,7 @@ export function ChatPanel({
   conversation,
   activeProvider,
   busy,
+  toolActivity,
   error,
   loading,
   sidebarCollapsed,
@@ -167,7 +169,11 @@ export function ChatPanel({
               onSelectPrompt={useStarterPrompt}
             />
           ) : (
-            <MessageThread messages={conversation.messages} busy={busy} />
+            <MessageThread
+              messages={conversation.messages}
+              busy={busy}
+              toolActivity={toolActivity}
+            />
           )}
         </div>
       </div>

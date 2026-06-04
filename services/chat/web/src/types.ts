@@ -62,3 +62,7 @@ export interface UpdateSettingsRequest {
   activeProviderId?: string;
   theme?: ThemeName;
 }
+
+export interface ToolActivity {
+  name: string;
+}
