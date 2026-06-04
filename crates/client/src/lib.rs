@@ -143,6 +143,7 @@ impl LocalModelClient {
                 max_tokens: request.options.max_tokens,
                 stream: false,
                 response_format: request.options.response_format,
+                tools: request.options.tools.as_deref(),
             });
 
         if let Some(authorization) = &self.authorization {
@@ -165,7 +166,8 @@ impl LocalModelClient {
             .next()
             .ok_or(ClientError::NoChoices)?;
         Ok(ChatCompletion {
-            content: choice.message.content,
+            content: choice.message.content.unwrap_or_default(),
+            tool_calls: choice.message.tool_calls,
             finish_reason: choice.finish_reason,
             usage: response.usage,
         })
@@ -189,6 +191,7 @@ impl LocalModelClient {
                 max_tokens: request.options.max_tokens,
                 stream: true,
                 response_format: request.options.response_format,
+                tools: request.options.tools.as_deref(),
             });
 
         if let Some(authorization) = &self.authorization {
@@ -226,6 +229,7 @@ impl LocalModelClient {
                 if data == "[DONE]" {
                     return Ok(ChatCompletion {
                         content,
+                        tool_calls: Vec::new(),
                         finish_reason,
                         usage,
                     });
@@ -250,6 +254,7 @@ impl LocalModelClient {
 
         Ok(ChatCompletion {
             content,
+            tool_calls: Vec::new(),
             finish_reason,
             usage,
         })
@@ -311,6 +316,10 @@ impl ChatRequest {
 pub struct ChatMessage {
     pub role: ChatRole,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ChatToolCall>,
 }
 
 impl ChatMessage {
@@ -318,6 +327,8 @@ impl ChatMessage {
         Self {
             role: ChatRole::System,
             content: content.into(),
+            tool_call_id: None,
+            tool_calls: Vec::new(),
         }
     }
 
@@ -325,6 +336,8 @@ impl ChatMessage {
         Self {
             role: ChatRole::User,
             content: content.into(),
+            tool_call_id: None,
+            tool_calls: Vec::new(),
         }
     }
 
@@ -332,6 +345,26 @@ impl ChatMessage {
         Self {
             role: ChatRole::Assistant,
             content: content.into(),
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }
+    }
+
+    pub fn assistant_tool_calls(tool_calls: Vec<ChatToolCall>) -> Self {
+        Self {
+            role: ChatRole::Assistant,
+            content: String::new(),
+            tool_call_id: None,
+            tool_calls,
+        }
+    }
+
+    pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: ChatRole::Tool,
+            content: content.into(),
+            tool_call_id: Some(tool_call_id.into()),
+            tool_calls: Vec::new(),
         }
     }
 }
@@ -345,11 +378,13 @@ pub enum ChatRole {
     Tool,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatOptions {
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
     pub response_format: Option<ResponseFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<serde_json::Value>>,
 }
 
 impl ChatOptions {
@@ -367,6 +402,11 @@ impl ChatOptions {
         self.response_format = Some(ResponseFormat::JsonObject);
         self
     }
+
+    pub fn tools(mut self, tools: Vec<serde_json::Value>) -> Self {
+        self.tools = Some(tools);
+        self
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -378,8 +418,24 @@ pub enum ResponseFormat {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatCompletion {
     pub content: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ChatToolCall>,
     pub finish_reason: Option<String>,
     pub usage: Option<Usage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: ChatToolFunctionCall,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatToolFunctionCall {
+    pub name: String,
+    pub arguments: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -476,6 +532,8 @@ struct ChatCompletionsRequestBody<'a> {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     response_format: Option<ResponseFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<&'a [serde_json::Value]>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -492,7 +550,9 @@ struct ChatChoice {
 
 #[derive(Debug, Deserialize)]
 struct ChatChoiceMessage {
-    content: String,
+    content: Option<String>,
+    #[serde(default)]
+    tool_calls: Vec<ChatToolCall>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -598,6 +658,16 @@ mod tests {
             format!("{authorization:?}"),
             "AuthorizationHeader { value: SecretString(<redacted>) }"
         );
+    }
+
+    #[test]
+    fn serializes_tool_result_message() {
+        let message = ChatMessage::tool_result("call-1", "{\"ok\":true}");
+        let value = serde_json::to_value(&message).unwrap();
+
+        assert_eq!(value["role"], "tool");
+        assert_eq!(value["tool_call_id"], "call-1");
+        assert_eq!(value["content"], "{\"ok\":true}");
     }
 
     #[test]
