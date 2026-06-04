@@ -1,5 +1,6 @@
 import { memo } from "react";
-import type { ChatMessageRecord, ToolActivity } from "../types";
+import { Globe2 } from "lucide-react";
+import type { ChatMessageMetadata, ChatMessageRecord, ChatSource, ToolActivity } from "../types";
 import { ActivityIndicator, ToolActivityIndicator } from "./ActivityIndicator";
 import { LazyCopyButton } from "./LazyCopyButton";
 import { MarkdownContent } from "./MarkdownContent";
@@ -82,6 +83,7 @@ const MessageBubble = memo(function MessageBubble({
         ) : (
           <div className="message-output">
             <MarkdownContent content={message.content} copyEnabled={copyEnabled} />
+            <MessageMetadataFooter metadata={message.metadata} />
             {copyEnabled ? (
               <div className="message-output-actions">
                 <LazyCopyButton
@@ -98,6 +100,84 @@ const MessageBubble = memo(function MessageBubble({
     </article>
   );
 });
+
+interface MessageMetadataFooterProps {
+  metadata?: ChatMessageMetadata;
+}
+
+function MessageMetadataFooter({ metadata }: MessageMetadataFooterProps) {
+  if (!hasWebToolUse(metadata)) {
+    return null;
+  }
+
+  const sources = uniqueSources(metadata?.sources ?? []).slice(0, 3);
+  const sourceCount = uniqueSources(metadata?.sources ?? []).length;
+
+  return (
+    <footer className="message-source-footer" aria-label="Web source note">
+      <Globe2 aria-hidden="true" size={13} strokeWidth={1.8} />
+      <span>searched web</span>
+      {sourceCount > 0 ? <span>{sourceCount} sources</span> : null}
+      <span>sources may be incomplete</span>
+      {sources.length > 0 ? (
+        <span className="message-source-links">
+          {sources.map((source) => (
+            <a
+              key={source.url}
+              href={source.url}
+              target="_blank"
+              rel="noreferrer"
+              title={source.title ?? source.url}
+            >
+              {sourceLabel(source)}
+            </a>
+          ))}
+        </span>
+      ) : null}
+    </footer>
+  );
+}
+
+function hasWebToolUse(metadata?: ChatMessageMetadata): boolean {
+  return (
+    metadata?.toolUses?.some((toolUse) =>
+      toolUse.name === "web_search" || toolUse.name === "fetch_url"
+    ) ?? false
+  );
+}
+
+function uniqueSources(sources: ChatSource[]): ChatSource[] {
+  const seen = new Set<string>();
+  const unique: ChatSource[] = [];
+
+  for (const source of sources) {
+    const url = source.url.trim();
+    if (url === "" || seen.has(url)) {
+      continue;
+    }
+    seen.add(url);
+    unique.push({ ...source, url });
+  }
+
+  return unique;
+}
+
+function sourceLabel(source: ChatSource): string {
+  const title = source.title?.trim();
+  if (title !== undefined && title !== "") {
+    return truncateText(title, 34);
+  }
+
+  try {
+    return new URL(source.url).hostname.replace(/^www\./, "");
+  } catch {
+    return truncateText(source.url, 34);
+  }
+}
+
+function truncateText(value: string, maxLength: number): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}...` : value;
+}
 
 function canCopyMessage(
   message: ChatMessageRecord,
