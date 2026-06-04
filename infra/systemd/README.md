@@ -153,6 +153,10 @@ Chat web tools are disabled until a provider is configured in a drop-in:
 systemctl --user edit rafael-chat
 ```
 
+The local SearXNG Docker Compose stack lives in
+`infra/docker/searxng`. It binds to `127.0.0.1:8888` and enables the JSON API
+required by the chat web search tool.
+
 SearXNG:
 
 ```ini
