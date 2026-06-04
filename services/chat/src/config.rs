@@ -45,6 +45,14 @@ impl AppConfig {
             .parse_or("RAFAEL_CHAT_WEB_FETCH_MAX_BYTES", 64 * 1024_usize)
             .context("failed to parse RAFAEL_CHAT_WEB_FETCH_MAX_BYTES")?
             .clamp(1024, 128 * 1024);
+        let web_search_fetch_results = reader
+            .parse_or("RAFAEL_CHAT_WEB_SEARCH_FETCH_RESULTS", 3_usize)
+            .context("failed to parse RAFAEL_CHAT_WEB_SEARCH_FETCH_RESULTS")?
+            .clamp(0, 5);
+        let web_search_fetch_max_bytes = reader
+            .parse_or("RAFAEL_CHAT_WEB_SEARCH_FETCH_MAX_BYTES", 16 * 1024_usize)
+            .context("failed to parse RAFAEL_CHAT_WEB_SEARCH_FETCH_MAX_BYTES")?
+            .clamp(2048, 32 * 1024);
         let web_tool_max_invocations = reader
             .parse_or("RAFAEL_CHAT_WEB_TOOL_MAX_INVOCATIONS", 4_usize)
             .context("failed to parse RAFAEL_CHAT_WEB_TOOL_MAX_INVOCATIONS")?
@@ -74,6 +82,8 @@ impl AppConfig {
                 fetch_timeout: Duration::from_secs(web_fetch_timeout_seconds),
                 max_search_results: web_search_max_results,
                 max_fetch_bytes: web_fetch_max_bytes,
+                max_search_fetches: web_search_fetch_results,
+                max_search_fetch_bytes: web_search_fetch_max_bytes,
                 max_invocations: web_tool_max_invocations,
             },
         })

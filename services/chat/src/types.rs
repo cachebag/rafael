@@ -127,6 +127,57 @@ pub struct ChatMessageRecord {
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<ChatMessageMetadata>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMessageMetadata {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_uses: Vec<ChatToolUse>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<ChatSource>,
+}
+
+impl ChatMessageMetadata {
+    pub fn is_empty(&self) -> bool {
+        self.tool_uses.is_empty() && self.sources.is_empty()
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        for tool_use in other.tool_uses {
+            if !self.tool_uses.iter().any(|existing| existing == &tool_use) {
+                self.tool_uses.push(tool_use);
+            }
+        }
+        for source in other.sources {
+            if !self
+                .sources
+                .iter()
+                .any(|existing| existing.url == source.url)
+            {
+                self.sources.push(source);
+            }
+        }
+    }
+
+    pub fn into_option(self) -> Option<Self> {
+        if self.is_empty() { None } else { Some(self) }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatToolUse {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSource {
+    pub title: Option<String>,
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

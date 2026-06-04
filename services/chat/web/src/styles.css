@@ -630,6 +630,51 @@ input:disabled {
   max-width: 100%;
 }
 
+.message-source-footer {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.message-source-footer svg {
+  flex: 0 0 auto;
+  opacity: 0.72;
+}
+
+.message-source-footer > span:not(:first-of-type)::before {
+  content: "/";
+  margin-right: 0.45rem;
+  color: color-mix(in srgb, var(--muted) 48%, transparent);
+}
+
+.message-source-links {
+  display: inline-flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.message-source-links a {
+  max-width: min(16rem, 100%);
+  overflow: hidden;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-overflow: ellipsis;
+  text-underline-offset: 0.2em;
+  white-space: nowrap;
+}
+
+.message-source-links a:hover {
+  color: var(--accent-hover);
+}
+
 .message-output-actions {
   position: absolute;
   right: 0.55rem;

@@ -44,6 +44,8 @@ RAFAEL_CHAT_WEB_SEARCH_TIMEOUT_SECONDS=15
 RAFAEL_CHAT_WEB_FETCH_TIMEOUT_SECONDS=15
 RAFAEL_CHAT_WEB_SEARCH_MAX_RESULTS=5
 RAFAEL_CHAT_WEB_FETCH_MAX_BYTES=65536
+RAFAEL_CHAT_WEB_SEARCH_FETCH_RESULTS=3
+RAFAEL_CHAT_WEB_SEARCH_FETCH_MAX_BYTES=16384
 RAFAEL_CHAT_WEB_TOOL_MAX_INVOCATIONS=4
 ```
 
@@ -61,7 +63,8 @@ Chat can expose two read-only tools to models when a search provider is
 configured:
 
 - `web_search`: searches the public web and returns bounded title, URL, snippet,
-  source, and date metadata.
+  source, date metadata, and small extracted page text for the first few
+  reachable public results.
 - `fetch_url`: fetches one public `http` or `https` URL and returns extracted
   readable text.
 
@@ -82,6 +85,10 @@ RAFAEL_CHAT_BRAVE_SEARCH_API_KEY=...
 `fetch_url` blocks localhost, private-network, link-local, and bare local host
 names, does not follow redirects, and caps fetched bytes with
 `RAFAEL_CHAT_WEB_FETCH_MAX_BYTES`.
+
+`web_search` auto-fetches up to `RAFAEL_CHAT_WEB_SEARCH_FETCH_RESULTS` results
+and caps each fetch with `RAFAEL_CHAT_WEB_SEARCH_FETCH_MAX_BYTES`. Set the
+result count to `0` to return snippets only.
 
 OpenAI-compatible providers are chat-enabled. Anthropic providers can be saved
 now, but need a provider adapter before they can be used for chat.

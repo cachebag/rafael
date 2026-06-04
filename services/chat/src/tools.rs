@@ -6,7 +6,12 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tool_registry::{ToolDefinition, ToolRegistry, object_schema};
 use tracing::warn;
-use web::{FetchOptions, SearchOptions, SearchProvider, WebFetcher, WebSearchClient};
+use web::{
+    FetchOptions, FetchedPage, SearchOptions, SearchProvider, SearchResponse, SearchResult,
+    WebFetcher, WebSearchClient,
+};
+
+use crate::types::{ChatMessageMetadata, ChatSource, ChatToolUse};
 
 #[derive(Debug, Clone)]
 pub struct ChatToolsConfig {
@@ -15,6 +20,8 @@ pub struct ChatToolsConfig {
     pub fetch_timeout: Duration,
     pub max_search_results: usize,
     pub max_fetch_bytes: usize,
+    pub max_search_fetches: usize,
+    pub max_search_fetch_bytes: usize,
     pub max_invocations: usize,
 }
 
@@ -63,9 +70,19 @@ impl ChatToolRuntime {
             .collect()
     }
 
-    pub async fn invoke(&self, call: &ChatToolCall) -> String {
+    pub async fn invoke(&self, call: &ChatToolCall) -> ToolInvocationResult {
+        let mut metadata = ChatMessageMetadata {
+            tool_uses: vec![ChatToolUse {
+                name: call.function.name.clone(),
+            }],
+            sources: Vec::new(),
+        };
+
         if self.registry.get(&call.function.name).is_none() {
-            return tool_error(format!("unknown tool `{}`", call.function.name));
+            return ToolInvocationResult {
+                content: tool_error(format!("unknown tool `{}`", call.function.name)),
+                metadata,
+            };
         }
 
         let result = match call.function.name.as_str() {
@@ -75,15 +92,24 @@ impl ChatToolRuntime {
         };
 
         match result {
-            Ok(value) => tool_ok(value),
+            Ok(invocation) => {
+                metadata.merge(invocation.metadata);
+                ToolInvocationResult {
+                    content: tool_ok(invocation.value),
+                    metadata,
+                }
+            }
             Err(err) => {
                 warn!(tool = %call.function.name, error = %err, "tool invocation failed");
-                tool_error(err.to_string())
+                ToolInvocationResult {
+                    content: tool_error(err.to_string()),
+                    metadata,
+                }
             }
         }
     }
 
-    async fn invoke_web_search(&self, arguments: &str) -> anyhow::Result<Value> {
+    async fn invoke_web_search(&self, arguments: &str) -> anyhow::Result<ToolValue> {
         let args: WebSearchArgs =
             serde_json::from_str(arguments).context("web_search arguments must be json")?;
         let max_results = args
@@ -95,10 +121,23 @@ impl ChatToolRuntime {
             .search(&args.query, SearchOptions { max_results })
             .await
             .context("web_search failed")?;
-        Ok(serde_json::to_value(response)?)
+        let sources = response
+            .results
+            .iter()
+            .map(search_result_source)
+            .collect::<Vec<_>>();
+        let enriched = self.enrich_search_response(response).await;
+
+        Ok(ToolValue {
+            value: serde_json::to_value(enriched)?,
+            metadata: ChatMessageMetadata {
+                tool_uses: Vec::new(),
+                sources,
+            },
+        })
     }
 
-    async fn invoke_fetch_url(&self, arguments: &str) -> anyhow::Result<Value> {
+    async fn invoke_fetch_url(&self, arguments: &str) -> anyhow::Result<ToolValue> {
         let args: FetchUrlArgs =
             serde_json::from_str(arguments).context("fetch_url arguments must be json")?;
         let max_bytes = args
@@ -110,7 +149,118 @@ impl ChatToolRuntime {
             .fetch(&args.url, FetchOptions { max_bytes })
             .await
             .context("fetch_url failed")?;
-        Ok(serde_json::to_value(page)?)
+        let source = ChatSource {
+            title: None,
+            url: page.url.clone(),
+        };
+        Ok(ToolValue {
+            value: serde_json::to_value(page)?,
+            metadata: ChatMessageMetadata {
+                tool_uses: Vec::new(),
+                sources: vec![source],
+            },
+        })
+    }
+
+    async fn enrich_search_response(&self, response: SearchResponse) -> EnrichedSearchResponse {
+        let mut enriched_results = Vec::with_capacity(response.results.len());
+        let mut fetches_remaining = self.config.max_search_fetches;
+
+        for result in response.results {
+            let fetched_page = if fetches_remaining > 0 {
+                fetches_remaining -= 1;
+                self.fetch_search_result(&result).await
+            } else {
+                None
+            };
+            enriched_results.push(EnrichedSearchResult::from_result(result, fetched_page));
+        }
+
+        EnrichedSearchResponse {
+            query: response.query,
+            provider: response.provider,
+            results: enriched_results,
+        }
+    }
+
+    async fn fetch_search_result(&self, result: &SearchResult) -> Option<FetchedPage> {
+        match self
+            .fetcher
+            .fetch(
+                &result.url,
+                FetchOptions {
+                    max_bytes: self.config.max_search_fetch_bytes,
+                },
+            )
+            .await
+        {
+            Ok(page) if !page.text.trim().is_empty() => Some(page),
+            Ok(_) => None,
+            Err(err) => {
+                warn!(url = %result.url, error = %err, "failed to enrich search result");
+                None
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolInvocationResult {
+    pub content: String,
+    pub metadata: ChatMessageMetadata,
+}
+
+struct ToolValue {
+    value: Value,
+    metadata: ChatMessageMetadata,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct EnrichedSearchResponse {
+    query: String,
+    provider: String,
+    results: Vec<EnrichedSearchResult>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct EnrichedSearchResult {
+    title: String,
+    url: String,
+    snippet: String,
+    source: Option<String>,
+    published_at: Option<String>,
+    fetched_page: Option<EnrichedFetchedPage>,
+}
+
+impl EnrichedSearchResult {
+    fn from_result(result: SearchResult, fetched_page: Option<FetchedPage>) -> Self {
+        Self {
+            title: result.title,
+            url: result.url,
+            snippet: result.snippet,
+            source: result.source,
+            published_at: result.published_at,
+            fetched_page: fetched_page.map(EnrichedFetchedPage::from_page),
+        }
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct EnrichedFetchedPage {
+    url: String,
+    text: String,
+    bytes: usize,
+    truncated: bool,
+}
+
+impl EnrichedFetchedPage {
+    fn from_page(page: FetchedPage) -> Self {
+        Self {
+            url: page.url,
+            text: page.text,
+            bytes: page.bytes,
+            truncated: page.truncated,
+        }
     }
 }
 
@@ -180,6 +330,17 @@ fn fetch_url_definition() -> Result<ToolDefinition, tool_registry::RegistryError
             vec!["url".to_owned()],
         ),
     )
+}
+
+fn search_result_source(result: &SearchResult) -> ChatSource {
+    ChatSource {
+        title: if result.title.trim().is_empty() {
+            None
+        } else {
+            Some(result.title.clone())
+        },
+        url: result.url.clone(),
+    }
 }
 
 fn tool_ok(value: Value) -> String {

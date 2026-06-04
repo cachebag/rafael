@@ -30,6 +30,21 @@ export interface ChatMessageRecord {
   content: string;
   createdAt: string;
   providerId?: string;
+  metadata?: ChatMessageMetadata;
+}
+
+export interface ChatMessageMetadata {
+  toolUses?: ChatToolUse[];
+  sources?: ChatSource[];
+}
+
+export interface ChatToolUse {
+  name: string;
+}
+
+export interface ChatSource {
+  title?: string;
+  url: string;
 }
 
 export interface Conversation {

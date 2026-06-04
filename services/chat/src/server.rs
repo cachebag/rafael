@@ -211,6 +211,7 @@ async fn send_message(
         content,
         created_at: now,
         provider_id: None,
+        metadata: None,
     });
     conversation.title = conversation_title(&conversation);
     conversation.updated_at = now;
@@ -234,6 +235,7 @@ async fn send_message(
         content: response,
         created_at: now,
         provider_id: Some(provider.id.clone()),
+        metadata: None,
     });
     conversation.updated_at = now;
     state.store.save_conversation(&conversation).await?;
@@ -305,6 +307,7 @@ async fn stream_message_worker(
         content,
         created_at: now,
         provider_id: None,
+        metadata: None,
     });
     conversation.title = conversation_title(&conversation);
     conversation.updated_at = now;
@@ -313,7 +316,7 @@ async fn stream_message_worker(
         conversation: conversation.clone(),
     });
 
-    let assistant_content = model::stream_chat(
+    let assistant_response = model::stream_chat(
         &provider,
         &conversation.messages,
         state.config.model_timeout,
@@ -335,9 +338,10 @@ async fn stream_message_worker(
     conversation.messages.push(ChatMessageRecord {
         id: new_id("msg"),
         role: ChatRole::Assistant,
-        content: assistant_content,
+        content: assistant_response.content,
         created_at: now,
         provider_id: Some(provider.id.clone()),
+        metadata: assistant_response.metadata,
     });
     conversation.updated_at = now;
     state.store.save_conversation(&conversation).await?;

@@ -6,7 +6,15 @@ use client::{
 };
 
 use crate::tools::ChatToolRuntime;
-use crate::types::{ChatMessageRecord, ChatRole, ProviderKind, StoredProvider};
+use crate::types::{
+    ChatMessageMetadata, ChatMessageRecord, ChatRole, ProviderKind, StoredProvider,
+};
+
+#[derive(Debug, Clone)]
+pub struct StreamedChatResponse {
+    pub content: String,
+    pub metadata: Option<ChatMessageMetadata>,
+}
 
 pub async fn complete_chat(
     provider: &StoredProvider,
@@ -28,7 +36,7 @@ pub async fn stream_chat<F, G>(
     tools: Option<&ChatToolRuntime>,
     on_delta: F,
     on_tool: G,
-) -> anyhow::Result<String>
+) -> anyhow::Result<StreamedChatResponse>
 where
     F: FnMut(&str),
     G: FnMut(&str),
@@ -86,7 +94,7 @@ async fn openai_compatible_stream_chat<F, G>(
     tools: Option<&ChatToolRuntime>,
     on_delta: F,
     on_tool: G,
-) -> anyhow::Result<String>
+) -> anyhow::Result<StreamedChatResponse>
 where
     F: FnMut(&str),
     G: FnMut(&str),
@@ -108,7 +116,10 @@ where
         .await
         .context("model endpoint returned an error")?;
 
-    Ok(response.content)
+    Ok(StreamedChatResponse {
+        content: response.content,
+        metadata: None,
+    })
 }
 
 async fn openai_compatible_stream_chat_with_tools<F, G>(
@@ -118,7 +129,7 @@ async fn openai_compatible_stream_chat_with_tools<F, G>(
     tools: &ChatToolRuntime,
     mut on_delta: F,
     mut on_tool: G,
-) -> anyhow::Result<String>
+) -> anyhow::Result<StreamedChatResponse>
 where
     F: FnMut(&str),
     G: FnMut(&str),
@@ -129,6 +140,7 @@ where
     let tool_options = ChatOptions::default().tools(tool_specs);
     let mut request_messages = model_messages(provider, messages);
     request_messages.insert(0, ChatMessage::system(WEB_TOOL_SYSTEM_PROMPT));
+    let mut metadata = ChatMessageMetadata::default();
 
     for _ in 0..tools.max_invocations() {
         let response = client
@@ -140,7 +152,10 @@ where
             if !response.content.is_empty() {
                 on_delta(&response.content);
             }
-            return Ok(response.content);
+            return Ok(StreamedChatResponse {
+                content: response.content,
+                metadata: metadata.into_option(),
+            });
         }
 
         request_messages.push(ChatMessage::assistant_tool_calls(
@@ -149,7 +164,8 @@ where
         for tool_call in response.tool_calls {
             on_tool(&tool_call.function.name);
             let result = tools.invoke(&tool_call).await;
-            request_messages.push(ChatMessage::tool_result(tool_call.id, result));
+            metadata.merge(result.metadata);
+            request_messages.push(ChatMessage::tool_result(tool_call.id, result.content));
         }
     }
 
@@ -158,7 +174,10 @@ where
         .await
         .context("model endpoint returned an error")?;
 
-    Ok(response.content)
+    Ok(StreamedChatResponse {
+        content: response.content,
+        metadata: metadata.into_option(),
+    })
 }
 
 fn model_client_config(provider: &StoredProvider, timeout: Duration) -> ModelClientConfig {
@@ -200,6 +219,8 @@ fn to_model_message(message: &ChatMessageRecord) -> Option<ChatMessage> {
 const WEB_TOOL_SYSTEM_PROMPT: &str = "\
 You may use tools for current or source-grounded information. \
 Use web_search for current events, recent facts, or questions that need external sources. \
+When web_search returns fetched_pages, use those extracts as source material before relying on snippets. \
 Use fetch_url only for public http(s) URLs from the user or from search results when you need more detail. \
 Do not fetch localhost, private-network, or admin URLs. \
-When using web information, cite the source URLs in the final answer.";
+When using web information, cite the source URLs in the final answer. \
+Do not add generic accuracy warnings, disclaimers, or warning banners; state uncertainty briefly only when it directly affects the answer.";
