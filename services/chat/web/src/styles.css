@@ -940,6 +940,22 @@ input:disabled {
   margin: 0.35rem 0;
 }
 
+.markdown-content .katex,
+.markdown-content .katex * {
+  color: var(--text);
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.markdown-content .katex-display {
+  max-width: 100%;
+  margin: 0.85rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.15rem 0;
+  -webkit-overflow-scrolling: touch;
+}
+
 .markdown-content a {
   color: var(--accent-hover);
   text-decoration: underline;
