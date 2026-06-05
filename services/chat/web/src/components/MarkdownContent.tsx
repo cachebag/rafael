@@ -2,7 +2,10 @@ import { isValidElement, memo, useMemo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
+import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import "katex/dist/katex.min.css";
 import { LazyCopyButton } from "./LazyCopyButton";
 
 interface MarkdownContentProps {
@@ -40,8 +43,8 @@ export const MarkdownContent = memo(function MarkdownContent({
   return (
     <div className="markdown-content">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { detect: true }]]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeHighlight, { detect: true }], rehypeKatex]}
         components={components}
       >
         {content}
