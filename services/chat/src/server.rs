@@ -292,16 +292,20 @@ async fn send_message(
     conversation.updated_at = now;
     store.save_conversation(&conversation).await?;
 
-    let response =
-        match model::complete_chat(provider, &conversation.messages, state.config.model_timeout)
-            .await
-        {
-            Ok(response) => response,
-            Err(err) => {
-                warn!(provider_id = %provider.id, error = %err, "model request failed");
-                return Err(ApiError::bad_gateway("model endpoint returned an error"));
-            }
-        };
+    let response = match model::complete_chat(
+        provider,
+        &conversation.messages,
+        state.config.model_timeout,
+        state.config.model_context_max_chars,
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            warn!(provider_id = %provider.id, error = %err, "model request failed");
+            return Err(ApiError::bad_gateway("model endpoint returned an error"));
+        }
+    };
 
     let now = Utc::now();
     conversation.messages.push(ChatMessageRecord {
@@ -399,6 +403,7 @@ async fn stream_message_worker(
         &provider,
         &conversation.messages,
         state.config.model_timeout,
+        state.config.model_context_max_chars,
         state.tools.as_ref(),
         |delta| {
             let _ = tx.send(ChatStreamEvent::Delta {

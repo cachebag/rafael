@@ -14,6 +14,7 @@ pub struct AppConfig {
     pub web_dist: PathBuf,
     pub default_provider: StoredProvider,
     pub model_timeout: Duration,
+    pub model_context_max_chars: usize,
     pub model_list_timeout: Duration,
     pub auth_token_ttl: chrono::Duration,
     pub tools: ChatToolsConfig,
@@ -29,6 +30,10 @@ impl AppConfig {
         let model_timeout_seconds = reader
             .parse_or("RAFAEL_CHAT_MODEL_TIMEOUT_SECONDS", 300_u64)
             .context("failed to parse RAFAEL_CHAT_MODEL_TIMEOUT_SECONDS")?;
+        let model_context_max_chars = reader
+            .parse_or("RAFAEL_CHAT_MODEL_CONTEXT_MAX_CHARS", 60_000_usize)
+            .context("failed to parse RAFAEL_CHAT_MODEL_CONTEXT_MAX_CHARS")?
+            .clamp(4096, 262_144);
         let model_list_timeout_seconds = reader
             .parse_or("RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS", 5_u64)
             .context("failed to parse RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS")?;
@@ -80,6 +85,7 @@ impl AppConfig {
                 system_prompt: reader.optional_string("RAFAEL_CHAT_SYSTEM_PROMPT"),
             },
             model_timeout: Duration::from_secs(model_timeout_seconds),
+            model_context_max_chars,
             model_list_timeout: Duration::from_secs(model_list_timeout_seconds),
             auth_token_ttl: chrono::Duration::days(auth_token_days),
             tools: ChatToolsConfig {
