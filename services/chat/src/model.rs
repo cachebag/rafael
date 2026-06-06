@@ -169,14 +169,14 @@ where
 
     for _ in 0..tools.max_invocations() {
         let response = client
-            .chat(ChatRequest::new(request_messages.clone()).with_options(tool_options.clone()))
+            .chat_stream(
+                ChatRequest::new(request_messages.clone()).with_options(tool_options.clone()),
+                &mut on_delta,
+            )
             .await
             .context("model endpoint returned an error")?;
 
         if response.tool_calls.is_empty() {
-            if !response.content.is_empty() {
-                on_delta(&response.content);
-            }
             return Ok(StreamedChatResponse {
                 content: response.content,
                 metadata: metadata.into_option(),

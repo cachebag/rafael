@@ -676,15 +676,6 @@ input:disabled {
   font-weight: 600;
 }
 
-.status-pill {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel);
-  color: var(--muted);
-  font-size: 0.75rem;
-  padding: 0.25rem 0.55rem;
-}
-
 .activity-indicator {
   display: inline-flex;
   min-width: 0;
@@ -1307,10 +1298,6 @@ input:disabled {
 
   .message-bubble-user {
     max-width: 92%;
-  }
-
-  .status-pill {
-    display: none;
   }
 
   .settings-overlay {

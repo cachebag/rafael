@@ -210,6 +210,7 @@ impl LocalModelClient {
 
         let mut buffer = String::new();
         let mut content = String::new();
+        let mut tool_calls = Vec::new();
         let mut finish_reason = None;
         let mut usage = None;
 
@@ -231,7 +232,7 @@ impl LocalModelClient {
                 if data == "[DONE]" {
                     return Ok(ChatCompletion {
                         content,
-                        tool_calls: Vec::new(),
+                        tool_calls: complete_stream_tool_calls(tool_calls),
                         finish_reason,
                         usage,
                     });
@@ -250,13 +251,16 @@ impl LocalModelClient {
                         content.push_str(&delta);
                         on_delta(&delta);
                     }
+                    for tool_call_delta in choice.delta.tool_calls {
+                        apply_stream_tool_call_delta(&mut tool_calls, tool_call_delta);
+                    }
                 }
             }
         }
 
         Ok(ChatCompletion {
             content,
-            tool_calls: Vec::new(),
+            tool_calls: complete_stream_tool_calls(tool_calls),
             finish_reason,
             usage,
         })
@@ -602,6 +606,76 @@ struct ChatStreamChoice {
 #[derive(Debug, Deserialize)]
 struct ChatStreamDelta {
     content: Option<String>,
+    #[serde(default)]
+    tool_calls: Vec<ChatStreamToolCallDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatStreamToolCallDelta {
+    index: Option<usize>,
+    id: Option<String>,
+    #[serde(rename = "type")]
+    tool_type: Option<String>,
+    function: Option<ChatStreamToolFunctionCallDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatStreamToolFunctionCallDelta {
+    name: Option<String>,
+    arguments: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct PendingStreamToolCall {
+    id: String,
+    tool_type: String,
+    function_name: String,
+    function_arguments: String,
+}
+
+fn apply_stream_tool_call_delta(
+    tool_calls: &mut Vec<PendingStreamToolCall>,
+    delta: ChatStreamToolCallDelta,
+) {
+    let index = delta.index.unwrap_or(0);
+    if tool_calls.len() <= index {
+        tool_calls.resize_with(index + 1, PendingStreamToolCall::default);
+    }
+
+    let tool_call = &mut tool_calls[index];
+    if let Some(id) = delta.id {
+        tool_call.id = id;
+    }
+    if let Some(tool_type) = delta.tool_type {
+        tool_call.tool_type = tool_type;
+    }
+    if let Some(function) = delta.function {
+        if let Some(name) = function.name {
+            tool_call.function_name.push_str(&name);
+        }
+        if let Some(arguments) = function.arguments {
+            tool_call.function_arguments.push_str(&arguments);
+        }
+    }
+}
+
+fn complete_stream_tool_calls(tool_calls: Vec<PendingStreamToolCall>) -> Vec<ChatToolCall> {
+    tool_calls
+        .into_iter()
+        .filter(|tool_call| !tool_call.id.is_empty() && !tool_call.function_name.is_empty())
+        .map(|tool_call| ChatToolCall {
+            id: tool_call.id,
+            tool_type: if tool_call.tool_type.is_empty() {
+                "function".to_owned()
+            } else {
+                tool_call.tool_type
+            },
+            function: ChatToolFunctionCall {
+                name: tool_call.function_name,
+                arguments: tool_call.function_arguments,
+            },
+        })
+        .collect()
 }
 
 #[derive(Debug, Deserialize)]
@@ -700,6 +774,47 @@ mod tests {
         assert_eq!(value["role"], "tool");
         assert_eq!(value["tool_call_id"], "call-1");
         assert_eq!(value["content"], "{\"ok\":true}");
+    }
+
+    #[test]
+    fn assembles_streamed_tool_call_deltas() {
+        let mut tool_calls = Vec::new();
+        apply_stream_tool_call_delta(
+            &mut tool_calls,
+            ChatStreamToolCallDelta {
+                index: Some(0),
+                id: Some("call-1".to_owned()),
+                tool_type: Some("function".to_owned()),
+                function: Some(ChatStreamToolFunctionCallDelta {
+                    name: Some("web_search".to_owned()),
+                    arguments: Some("{\"query\":\"stream".to_owned()),
+                }),
+            },
+        );
+        apply_stream_tool_call_delta(
+            &mut tool_calls,
+            ChatStreamToolCallDelta {
+                index: Some(0),
+                id: None,
+                tool_type: None,
+                function: Some(ChatStreamToolFunctionCallDelta {
+                    name: None,
+                    arguments: Some("ing\"}".to_owned()),
+                }),
+            },
+        );
+
+        assert_eq!(
+            complete_stream_tool_calls(tool_calls),
+            vec![ChatToolCall {
+                id: "call-1".to_owned(),
+                tool_type: "function".to_owned(),
+                function: ChatToolFunctionCall {
+                    name: "web_search".to_owned(),
+                    arguments: "{\"query\":\"streaming\"}".to_owned(),
+                },
+            }]
+        );
     }
 
     #[test]

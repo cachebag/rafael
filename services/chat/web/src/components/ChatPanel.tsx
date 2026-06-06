@@ -147,7 +147,6 @@ export function ChatPanel({
               </p>
             </div>
           </div>
-          {busy ? <span className="status-pill shrink-0">working</span> : null}
         </div>
       </header>
 

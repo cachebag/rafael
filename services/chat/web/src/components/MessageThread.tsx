@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Globe2 } from "lucide-react";
 import type { ChatMessageMetadata, ChatMessageRecord, ChatSource, ToolActivity } from "../types";
-import { ActivityIndicator, ToolActivityIndicator } from "./ActivityIndicator";
+import { ToolActivityIndicator } from "./ActivityIndicator";
 import { LazyCopyButton } from "./LazyCopyButton";
 import { MarkdownContent } from "./MarkdownContent";
 
@@ -16,8 +16,8 @@ export const MessageThread = memo(function MessageThread({
   busy,
   toolActivity
 }: MessageThreadProps) {
-  const showPendingResponse =
-    busy && messages.length > 0 && messages.at(-1)?.role === "user";
+  const showToolActivity =
+    busy && toolActivity !== null && messages.length > 0 && messages.at(-1)?.role === "user";
 
   return (
     <div className="grid w-full min-w-0 gap-5">
@@ -28,14 +28,10 @@ export const MessageThread = memo(function MessageThread({
           copyEnabled={canCopyMessage(message, index, messages.length, busy)}
         />
       ))}
-      {showPendingResponse ? (
+      {showToolActivity ? (
         <article className="flex w-full min-w-0 justify-start">
           <div className="message-activity">
-            {toolActivity === null ? (
-              <ActivityIndicator label="Waiting for response" />
-            ) : (
-              <ToolActivityIndicator label={toolActivityLabel(toolActivity)} />
-            )}
+            <ToolActivityIndicator label={toolActivityLabel(toolActivity)} />
           </div>
         </article>
       ) : null}
