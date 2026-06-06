@@ -14,7 +14,9 @@ logLevel: info
 logToStdout: both
 startPort: 18080
 globalTTL: 600
-sendLoadingState: true
+# Zed expects strict OpenAI-compatible streaming chunks. Loading-state reasoning
+# chunks can make it fail with "ResponseStreamResult" parse errors.
+sendLoadingState: false
 includeAliasesInList: false
 
 macros:
