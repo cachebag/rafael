@@ -1,5 +1,20 @@
 # rafael
 
+<p align="center">
+  <a href="https://github.com/cachebag/rafael/actions/workflows/rust-ci.yml">
+    <img alt="rust CI" src="https://github.com/cachebag/rafael/actions/workflows/rust-ci.yml/badge.svg?branch=master">
+  </a>
+  <a href="https://github.com/cachebag/rafael/actions/workflows/payme-web-ci.yml">
+    <img alt="payme web CI" src="https://github.com/cachebag/rafael/actions/workflows/payme-web-ci.yml/badge.svg?branch=master">
+  </a>
+  <a href="https://github.com/cachebag/rafael/actions/workflows/deploy-chat.yml">
+    <img alt="deploy chat" src="https://github.com/cachebag/rafael/actions/workflows/deploy-chat.yml/badge.svg?branch=master">
+  </a>
+  <a href="https://github.com/cachebag/rafael/actions/workflows/deploy-payme.yml">
+    <img alt="deploy payme" src="https://github.com/cachebag/rafael/actions/workflows/deploy-payme.yml/badge.svg?branch=master">
+  </a>
+</p>
+
 rafael is both my workstation and the name for this monorepo with all the various services, crates and configuration files that power my homelab.
 
 [tailscale](https://tailscale.com/) is used as a mesh VPN between my devices.
