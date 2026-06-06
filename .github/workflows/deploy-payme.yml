@@ -1,0 +1,57 @@
+name: deploy payme
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "services/payme/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "infra/systemd/rafael-payme.service"
+      - ".github/workflows/deploy-payme.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-rafael
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: deploy payme on rafael
+        run: |
+          set -euo pipefail
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+          export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+
+          REPO="$HOME/rafael"
+          cd "$REPO"
+
+          git fetch origin master
+          git reset --hard origin/master
+
+          cd services/payme/frontend
+          npm ci
+          npm run build
+
+          cd "$REPO"
+          cargo build --release -p payme
+
+          mkdir -p "$HOME/.config/systemd/user"
+          ln -sf "$REPO/infra/systemd/rafael-payme.service" "$HOME/.config/systemd/user/rafael-payme.service"
+          systemctl --user daemon-reload
+          systemctl --user restart rafael-payme
+          systemctl --user is-active rafael-payme
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3032/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "payme service did not become ready on port 3032"
+          journalctl --user -u rafael-payme -n 20 --no-pager
+          exit 1

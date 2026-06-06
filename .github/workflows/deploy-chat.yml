@@ -15,8 +15,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-chat
-  cancel-in-progress: true
+  group: deploy-rafael
+  cancel-in-progress: false
 
 jobs:
   deploy:
