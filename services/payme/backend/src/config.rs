@@ -13,7 +13,8 @@ impl Config {
             bind: env::var("PAYME_BIND").unwrap_or_else(|_| "127.0.0.1:3001".to_string()),
             database_url: env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite:payme.db?mode=rwc".to_string()),
-            static_dir: env::var("PAYME_STATIC_DIR").unwrap_or_else(|_| "frontend/dist".to_string()),
+            static_dir: env::var("PAYME_STATIC_DIR")
+                .unwrap_or_else(|_| "frontend/dist".to_string()),
         }
     }
 }
@@ -88,5 +89,4 @@ mod tests {
             std::env::remove_var("PAYME_STATIC_DIR");
         }
     }
-
 }

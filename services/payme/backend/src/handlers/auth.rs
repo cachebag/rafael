@@ -13,7 +13,7 @@ use utoipa::ToSchema;
 use validator::Validate;
 
 use crate::error::PaymeError;
-use crate::middleware::auth::{AUTH_COOKIE_NAME, Claims};
+use crate::middleware::auth::{Claims, AUTH_COOKIE_NAME};
 
 const LEGACY_AUTH_COOKIE_NAME: &str = "token";
 
