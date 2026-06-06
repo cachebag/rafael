@@ -1,0 +1,26 @@
+[Unit]
+Description=rafael payme
+After=network-online.target
+
+[Service]
+Type=simple
+
+# Put secrets in this file, for example:
+#
+#   JWT_SECRET=replace-with-a-long-random-value
+#
+EnvironmentFile=-%h/rafael/data/payme/payme.env
+
+Environment=DATABASE_URL=sqlite:%h/rafael/data/payme/payme.db?mode=rwc
+Environment=PAYME_STATIC_DIR=%h/rafael/services/payme/frontend/dist
+Environment=PAYME_BIND=127.0.0.1:3032
+
+WorkingDirectory=%h/rafael
+ExecStartPre=mkdir -p %h/rafael/data/payme
+ExecStart=%h/rafael/target/release/payme
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

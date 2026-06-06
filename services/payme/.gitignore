@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+target/
+
+# Build output
+frontend/dist/
+*.wasm
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Rust
+**/*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+.nyc_output/
+
+# Misc
+*.bak
+*.tmp
+*.temp
+.cache/

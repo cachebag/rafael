@@ -19,10 +19,21 @@ The active pieces right now are:
 
 - `services/coding`: the GitHub App coding worker.
 - `services/chat`: the local model chat interface.
+- `services/payme`: the personal finance tracker.
 - `infra/docker/searxng`: the local SearXNG search backend for chat web search.
 - `infra/systemd/llama-swap.service`: the user systemd service for the local
   model lifecycle proxy.
 - `infra/systemd/rafael-chat.service`: the user systemd service for the chat UI.
+- `infra/systemd/rafael-payme.service`: the user systemd service for Payme.
+
+## Public Services
+
+Tailscale Funnel exposes the local web services publicly:
+
+```txt
+https://rafael.taild0efc0.ts.net/       -> rafael chat
+https://rafael.taild0efc0.ts.net:8443/  -> payme
+```
 
 ## Local Model
 

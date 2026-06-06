@@ -1,0 +1,283 @@
+use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+
+pub async fn create_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect(database_url)
+        .await?;
+    Ok(pool)
+}
+
+pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            savings REAL NOT NULL DEFAULT 0,
+            savings_goal REAL NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("ALTER TABLE users ADD COLUMN savings REAL NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await
+        .ok();
+
+    sqlx::query("ALTER TABLE users ADD COLUMN retirement_savings REAL NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await
+        .ok();
+
+    sqlx::query("ALTER TABLE users ADD COLUMN savings_goal REAL NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await
+        .ok();
+
+    sqlx::query("UPDATE users SET retirement_savings = roth_ira WHERE retirement_savings = 0 AND roth_ira IS NOT NULL AND roth_ira > 0")
+        .execute(pool)
+        .await
+        .ok();
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS fixed_expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            amount REAL NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS budget_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            default_amount REAL NOT NULL,
+            color TEXT NOT NULL DEFAULT '#71717a',
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    let _ = sqlx::query(
+        "ALTER TABLE budget_categories ADD COLUMN color TEXT NOT NULL DEFAULT '#71717a'",
+    )
+    .execute(pool)
+    .await;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS months (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            year INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            is_closed INTEGER NOT NULL DEFAULT 0,
+            closed_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            UNIQUE(user_id, year, month)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS income_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month_id INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            amount REAL NOT NULL,
+            FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS monthly_budgets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month_id INTEGER NOT NULL,
+            category_id INTEGER NOT NULL,
+            allocated_amount REAL NOT NULL,
+            FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE,
+            FOREIGN KEY (category_id) REFERENCES budget_categories(id) ON DELETE CASCADE,
+            UNIQUE(month_id, category_id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month_id INTEGER NOT NULL,
+            category_id INTEGER NOT NULL,
+            description TEXT NOT NULL,
+            amount REAL NOT NULL,
+            spent_on TEXT NOT NULL,
+            savings_destination TEXT NOT NULL DEFAULT 'none',
+            FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE,
+            FOREIGN KEY (category_id) REFERENCES budget_categories(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    let _ = sqlx::query(
+        "ALTER TABLE items ADD COLUMN savings_destination TEXT NOT NULL DEFAULT 'none'",
+    )
+    .execute(pool)
+    .await;
+
+    sqlx::query("UPDATE items SET savings_destination = 'none' WHERE savings_destination = '' OR savings_destination IS NULL")
+        .execute(pool)
+        .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS monthly_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month_id INTEGER NOT NULL UNIQUE,
+            pdf_data BLOB NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS monthly_fixed_expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month_id INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            amount REAL NOT NULL,
+            FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS monthly_savings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month_id INTEGER NOT NULL UNIQUE,
+            savings REAL NOT NULL DEFAULT 0,
+            retirement_savings REAL NOT NULL DEFAULT 0,
+            savings_goal REAL NOT NULL DEFAULT 0,
+            FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS custom_savings_goals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            current_amount REAL NOT NULL DEFAULT 0,
+            target_amount REAL NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS retirement_breakdown_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            amount REAL NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    // Migration: Backfill existing months with current fixed expenses and savings
+    // This ensures existing data is preserved when upgrading
+    let existing_months: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT id, user_id FROM months WHERE id NOT IN (SELECT DISTINCT month_id FROM monthly_fixed_expenses)",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    for (month_id, user_id) in existing_months {
+        // Copy current fixed expenses to this month
+        let fixed_expenses: Vec<(String, f64)> =
+            sqlx::query_as("SELECT label, amount FROM fixed_expenses WHERE user_id = ?")
+                .bind(user_id)
+                .fetch_all(pool)
+                .await
+                .unwrap_or_default();
+
+        for (label, amount) in fixed_expenses {
+            sqlx::query(
+                "INSERT INTO monthly_fixed_expenses (month_id, label, amount) VALUES (?, ?, ?)",
+            )
+            .bind(month_id)
+            .bind(&label)
+            .bind(amount)
+            .execute(pool)
+            .await
+            .ok();
+        }
+
+        // Copy current savings values to this month
+        let user_savings: Option<(f64, f64, f64)> = sqlx::query_as(
+            "SELECT savings, retirement_savings, savings_goal FROM users WHERE id = ?",
+        )
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+        .unwrap_or(None);
+
+        if let Some((savings, retirement_savings, savings_goal)) = user_savings {
+            sqlx::query(
+                "INSERT INTO monthly_savings (month_id, savings, retirement_savings, savings_goal) VALUES (?, ?, ?, ?)",
+            )
+            .bind(month_id)
+            .bind(savings)
+            .bind(retirement_savings)
+            .bind(savings_goal)
+            .execute(pool)
+            .await
+            .ok();
+        }
+    }
+
+    Ok(())
+}

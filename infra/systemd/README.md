@@ -216,6 +216,56 @@ From Tailscale devices, use:
 http://rafael:3031
 ```
 
+Public Funnel endpoint:
+
+```txt
+https://rafael.taild0efc0.ts.net/
+```
+
+## rafael-payme.service
+
+The checked-in unit serves Payme from this repo:
+
+```ini
+DATABASE_URL=sqlite:%h/rafael/data/payme/payme.db?mode=rwc
+PAYME_STATIC_DIR=%h/rafael/services/payme/frontend/dist
+PAYME_BIND=127.0.0.1:3032
+```
+
+Secrets live in `%h/rafael/data/payme/payme.env`:
+
+```ini
+JWT_SECRET=...
+```
+
+Build the frontend and release binary before starting the unit:
+
+```bash
+cd ~/rafael/services/payme/frontend
+npm run build
+
+cd ~/rafael
+cargo build --release -p payme
+```
+
+Check whether the unit is running:
+
+```bash
+systemctl --user status rafael-payme
+```
+
+Confirm Payme is answering:
+
+```bash
+curl http://127.0.0.1:3032/health
+```
+
+Public Funnel endpoint:
+
+```txt
+https://rafael.taild0efc0.ts.net:8443/
+```
+
 ## llama-server.service
 
 `llama-server.service` is kept as a direct single-model fallback. Do not run it
