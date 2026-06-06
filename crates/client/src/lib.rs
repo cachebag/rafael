@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use common::SecretString;
 use futures_util::StreamExt;
-use reqwest::Client;
 use reqwest::header::AUTHORIZATION;
+use reqwest::{Client, Response, StatusCode};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
@@ -13,6 +13,8 @@ pub enum ClientError {
     BuildHttp(#[source] reqwest::Error),
     #[error("failed to call model endpoint: {0}")]
     Http(#[source] reqwest::Error),
+    #[error("model endpoint returned {status}: {body}")]
+    Status { status: StatusCode, body: String },
     #[error("model endpoint returned no choices")]
     NoChoices,
     #[error("model response did not contain json")]
@@ -123,8 +125,8 @@ impl LocalModelClient {
             .send()
             .await
             .map_err(ClientError::Http)?
-            .error_for_status()
-            .map_err(ClientError::Http)?
+            .success_or_status_error()
+            .await?
             .json::<ModelsResponse>()
             .await
             .map_err(ClientError::Http)?;
@@ -154,8 +156,8 @@ impl LocalModelClient {
             .send()
             .await
             .map_err(ClientError::Http)?
-            .error_for_status()
-            .map_err(ClientError::Http)?
+            .success_or_status_error()
+            .await?
             .json::<ChatCompletionsResponse>()
             .await
             .map_err(ClientError::Http)?;
@@ -202,8 +204,8 @@ impl LocalModelClient {
             .send()
             .await
             .map_err(ClientError::Http)?
-            .error_for_status()
-            .map_err(ClientError::Http)?
+            .success_or_status_error()
+            .await?
             .bytes_stream();
 
         let mut buffer = String::new();
@@ -289,6 +291,36 @@ impl LocalModelClient {
             .await?;
         parse_json_output(&content)
     }
+}
+
+trait ResponseExt {
+    async fn success_or_status_error(self) -> Result<Response, ClientError>;
+}
+
+impl ResponseExt for Response {
+    async fn success_or_status_error(self) -> Result<Response, ClientError> {
+        let status = self.status();
+        if status.is_success() {
+            return Ok(self);
+        }
+
+        let body = match self.text().await {
+            Ok(body) => truncate_status_body(body),
+            Err(err) => format!("failed to read error body: {err}"),
+        };
+        Err(ClientError::Status { status, body })
+    }
+}
+
+fn truncate_status_body(body: String) -> String {
+    const MAX_BODY_CHARS: usize = 2048;
+    if body.chars().count() <= MAX_BODY_CHARS {
+        return body;
+    }
+
+    let mut truncated = body.chars().take(MAX_BODY_CHARS).collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
