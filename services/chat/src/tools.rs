@@ -76,6 +76,7 @@ impl ChatToolRuntime {
                 name: call.function.name.clone(),
             }],
             sources: Vec::new(),
+            ..ChatMessageMetadata::default()
         };
 
         if self.registry.get(&call.function.name).is_none() {
@@ -133,6 +134,7 @@ impl ChatToolRuntime {
             metadata: ChatMessageMetadata {
                 tool_uses: Vec::new(),
                 sources,
+                ..ChatMessageMetadata::default()
             },
         })
     }
@@ -158,6 +160,7 @@ impl ChatToolRuntime {
             metadata: ChatMessageMetadata {
                 tool_uses: Vec::new(),
                 sources: vec![source],
+                ..ChatMessageMetadata::default()
             },
         })
     }

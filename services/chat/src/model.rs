@@ -3,7 +3,9 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use client::{
     ChatMessage, ChatOptions, ChatRequest, LocalModelClient, ModelClientConfig, ModelInfo,
+    parse_json_output,
 };
+use serde::Deserialize;
 
 use crate::tools::ChatToolRuntime;
 use crate::types::{
@@ -19,12 +21,20 @@ pub struct StreamedChatResponse {
 pub async fn complete_chat(
     provider: &StoredProvider,
     messages: &[ChatMessageRecord],
+    memory_context: Option<&str>,
     timeout: Duration,
     max_context_chars: usize,
 ) -> anyhow::Result<String> {
     match provider.kind {
         ProviderKind::OpenAiCompatible => {
-            openai_compatible_chat(provider, messages, timeout, max_context_chars).await
+            openai_compatible_chat(
+                provider,
+                messages,
+                memory_context,
+                timeout,
+                max_context_chars,
+            )
+            .await
         }
         ProviderKind::Anthropic => {
             bail!("anthropic providers can be saved but are not chat-enabled yet")
@@ -35,6 +45,7 @@ pub async fn complete_chat(
 pub async fn stream_chat<F, G>(
     provider: &StoredProvider,
     messages: &[ChatMessageRecord],
+    memory_context: Option<&str>,
     timeout: Duration,
     max_context_chars: usize,
     tools: Option<&ChatToolRuntime>,
@@ -50,6 +61,7 @@ where
             openai_compatible_stream_chat(
                 provider,
                 messages,
+                memory_context,
                 timeout,
                 max_context_chars,
                 tools,
@@ -81,18 +93,76 @@ pub async fn list_models(
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExtractedMemoryCandidate {
+    pub kind: String,
+    pub content: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub confidence: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryExtractionOutput {
+    #[serde(default)]
+    memories: Vec<ExtractedMemoryCandidate>,
+}
+
+pub async fn extract_memory_candidates(
+    provider: &StoredProvider,
+    messages: &[ChatMessageRecord],
+    timeout: Duration,
+) -> anyhow::Result<Vec<ExtractedMemoryCandidate>> {
+    match provider.kind {
+        ProviderKind::OpenAiCompatible => {
+            let client = LocalModelClient::new(model_client_config(provider, timeout))
+                .context("failed to create model client")?;
+            let request_messages = model_messages(
+                provider,
+                messages,
+                12_000,
+                &[MEMORY_EXTRACTION_SYSTEM_PROMPT],
+            );
+            let response = client
+                .chat(ChatRequest::new(request_messages))
+                .await
+                .context("model endpoint returned an error")?;
+            let output: MemoryExtractionOutput = parse_json_output(&response.content)
+                .context("failed to parse memory extraction output")?;
+            Ok(output
+                .memories
+                .into_iter()
+                .filter(|memory| !memory.content.trim().is_empty())
+                .take(8)
+                .collect())
+        }
+        ProviderKind::Anthropic => Ok(Vec::new()),
+    }
+}
+
 async fn openai_compatible_chat(
     provider: &StoredProvider,
     messages: &[ChatMessageRecord],
+    memory_context: Option<&str>,
     timeout: Duration,
     max_context_chars: usize,
 ) -> anyhow::Result<String> {
     let client = LocalModelClient::new(model_client_config(provider, timeout))
         .context("failed to create model client")?;
+    let mut extra_system_prompts = Vec::new();
+    if let Some(memory_context) = memory_context {
+        extra_system_prompts.push(memory_context);
+    }
     let response = client
         .chat(
-            ChatRequest::new(model_messages(provider, messages, max_context_chars, &[]))
-                .with_options(ChatOptions::default()),
+            ChatRequest::new(model_messages(
+                provider,
+                messages,
+                max_context_chars,
+                &extra_system_prompts,
+            ))
+            .with_options(ChatOptions::default()),
         )
         .await
         .context("model endpoint returned an error")?;
@@ -103,6 +173,7 @@ async fn openai_compatible_chat(
 async fn openai_compatible_stream_chat<F, G>(
     provider: &StoredProvider,
     messages: &[ChatMessageRecord],
+    memory_context: Option<&str>,
     timeout: Duration,
     max_context_chars: usize,
     tools: Option<&ChatToolRuntime>,
@@ -117,6 +188,7 @@ where
         return openai_compatible_stream_chat_with_tools(
             provider,
             messages,
+            memory_context,
             timeout,
             tools,
             on_delta,
@@ -128,9 +200,18 @@ where
 
     let client = LocalModelClient::new(model_client_config(provider, timeout))
         .context("failed to create model client")?;
+    let mut extra_system_prompts = Vec::new();
+    if let Some(memory_context) = memory_context {
+        extra_system_prompts.push(memory_context);
+    }
     let response = client
         .chat_stream(
-            ChatRequest::new(model_messages(provider, messages, max_context_chars, &[])),
+            ChatRequest::new(model_messages(
+                provider,
+                messages,
+                max_context_chars,
+                &extra_system_prompts,
+            )),
             on_delta,
         )
         .await
@@ -145,6 +226,7 @@ where
 async fn openai_compatible_stream_chat_with_tools<F, G>(
     provider: &StoredProvider,
     messages: &[ChatMessageRecord],
+    memory_context: Option<&str>,
     timeout: Duration,
     tools: &ChatToolRuntime,
     mut on_delta: F,
@@ -159,12 +241,13 @@ where
         .context("failed to create model client")?;
     let tool_specs = tools.openai_tools()?;
     let tool_options = ChatOptions::default().tools(tool_specs);
-    let mut request_messages = model_messages(
-        provider,
-        messages,
-        max_context_chars,
-        &[WEB_TOOL_SYSTEM_PROMPT],
-    );
+    let mut extra_system_prompts = Vec::new();
+    if let Some(memory_context) = memory_context {
+        extra_system_prompts.push(memory_context);
+    }
+    extra_system_prompts.push(WEB_TOOL_SYSTEM_PROMPT);
+    let mut request_messages =
+        model_messages(provider, messages, max_context_chars, &extra_system_prompts);
     let mut metadata = ChatMessageMetadata::default();
 
     for _ in 0..tools.max_invocations() {
@@ -369,6 +452,14 @@ Use fetch_url only for public http(s) URLs from the user or from search results 
 Do not fetch localhost, private-network, or admin URLs. \
 When using web information, cite the source URLs in the final answer. \
 Do not add generic accuracy warnings, disclaimers, or warning banners; state uncertainty briefly only when it directly affects the answer.";
+
+const MEMORY_EXTRACTION_SYSTEM_PROMPT: &str = "\
+Extract durable user memories from this chat. Return only JSON with this shape: \
+{\"memories\":[{\"kind\":\"preference|fact|instruction|note\",\"content\":\"...\",\"tags\":[\"...\"],\"confidence\":0.0}]}. \
+Only include information likely to remain useful across future conversations: user preferences, stable personal facts, explicit instructions, long-running projects, recurring constraints, and corrections. \
+Do not store secrets, passwords, tokens, one-off requests, transient mood, medical/legal/financial conclusions, or facts about other people unless the user explicitly asked you to remember them. \
+Each content value must be a short, standalone sentence written as memory context for a future assistant. \
+If there is nothing worth remembering, return {\"memories\":[]}.";
 
 #[cfg(test)]
 mod tests {

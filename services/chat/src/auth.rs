@@ -13,6 +13,7 @@ use argon2::{
 };
 use chrono::{Duration, Utc};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use memory::sqlite::SqliteMemoryStore;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::AsyncWriteExt;
 
@@ -124,6 +125,17 @@ impl AuthStore {
 
     pub fn user_chat_store(&self, user: &PublicUser) -> ChatStore {
         ChatStore::new(self.data_dir.join("users").join(&user.id).join("chat"))
+    }
+
+    pub async fn user_memory_store(&self, user: &PublicUser) -> anyhow::Result<SqliteMemoryStore> {
+        Ok(SqliteMemoryStore::connect(
+            self.data_dir
+                .join("users")
+                .join(&user.id)
+                .join("chat")
+                .join("memory"),
+        )
+        .await?)
     }
 
     fn session_for(&self, user: StoredUser) -> anyhow::Result<AuthSession> {

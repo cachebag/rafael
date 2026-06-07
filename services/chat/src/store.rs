@@ -114,6 +114,7 @@ impl ChatStore {
             id: new_id("conv"),
             title: clean_optional(title).unwrap_or_else(|| "New conversation".to_owned()),
             pinned: false,
+            memory_mode: None,
             created_at: now,
             updated_at: now,
             messages: Vec::new(),

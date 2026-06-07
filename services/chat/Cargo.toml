@@ -13,6 +13,7 @@ client = { path = "../../crates/client" }
 common = { path = "../../crates/common" }
 config = { path = "../../crates/config" }
 jsonwebtoken = { version = "10.4.0", default-features = false, features = ["rust_crypto"] }
+memory = { path = "../../crates/memory" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 tool-registry = { path = "../../crates/tool-registry" }

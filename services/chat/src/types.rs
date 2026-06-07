@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use memory::sqlite::{ConversationMemoryMode, MemoryRecord, MemorySettings, MemoryStatus};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
@@ -119,6 +120,8 @@ pub struct Conversation {
     pub title: String,
     #[serde(default)]
     pub pinned: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_mode: Option<ConversationMemoryMode>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub messages: Vec<ChatMessageRecord>,
@@ -168,11 +171,13 @@ pub struct ChatMessageMetadata {
     pub tool_uses: Vec<ChatToolUse>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<ChatSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub memories: Vec<ChatMemoryUse>,
 }
 
 impl ChatMessageMetadata {
     pub fn is_empty(&self) -> bool {
-        self.tool_uses.is_empty() && self.sources.is_empty()
+        self.tool_uses.is_empty() && self.sources.is_empty() && self.memories.is_empty()
     }
 
     pub fn merge(&mut self, other: Self) {
@@ -188,6 +193,15 @@ impl ChatMessageMetadata {
                 .any(|existing| existing.url == source.url)
             {
                 self.sources.push(source);
+            }
+        }
+        for memory in other.memories {
+            if !self
+                .memories
+                .iter()
+                .any(|existing| existing.id == memory.id)
+            {
+                self.memories.push(memory);
             }
         }
     }
@@ -210,6 +224,14 @@ pub struct ChatSource {
     pub url: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMemoryUse {
+    pub id: String,
+    pub kind: String,
+    pub content: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChatRole {
@@ -222,12 +244,16 @@ pub enum ChatRole {
 #[serde(rename_all = "camelCase")]
 pub struct CreateConversationRequest {
     pub title: Option<String>,
+    #[serde(default)]
+    pub memory_mode: Option<ConversationMemoryMode>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateConversationRequest {
     pub pinned: Option<bool>,
+    #[serde(default)]
+    pub memory_mode: Option<ConversationMemoryMode>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -262,5 +288,71 @@ pub struct ChatStateResponse {
     pub providers: Vec<PublicProvider>,
     pub active_provider_id: String,
     pub theme: ThemeName,
+    pub memory: MemoryStateResponse,
     pub conversations: Vec<ConversationSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryStateResponse {
+    pub settings: MemorySettings,
+    pub counts: MemoryCounts,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryCounts {
+    pub pending: usize,
+    pub active: usize,
+    pub archived: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMemorySettingsRequest {
+    pub enabled: Option<bool>,
+    pub auto_capture: Option<bool>,
+    pub require_approval: Option<bool>,
+    pub default_conversation_mode: Option<ConversationMemoryMode>,
+    pub memory_budget_chars: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMemoryRequest {
+    pub kind: String,
+    pub content: String,
+    #[serde(default)]
+    pub status: Option<MemoryStatus>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub source_conversation_id: Option<String>,
+    #[serde(default)]
+    pub source_message_ids: Vec<String>,
+    #[serde(default)]
+    pub confidence: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMemoryRequest {
+    pub kind: Option<String>,
+    pub content: Option<String>,
+    pub status: Option<MemoryStatus>,
+    pub tags: Option<Vec<String>>,
+    pub confidence: Option<Option<f64>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListMemoriesQuery {
+    pub query: Option<String>,
+    pub status: Option<MemoryStatus>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryListResponse {
+    pub memories: Vec<MemoryRecord>,
 }

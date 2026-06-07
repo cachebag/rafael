@@ -1,8 +1,9 @@
 use std::{convert::Infallible, sync::Arc};
 
+use anyhow::Context;
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{
         IntoResponse, Response,
@@ -13,6 +14,10 @@ use axum::{
 use chrono::Utc;
 use client::ModelInfo;
 use common::{SafeComponent, slugify};
+use memory::sqlite::{
+    ConversationMemoryMode, MemoryListFilter, MemoryRecord, MemoryRecordPatch, MemorySettingsPatch,
+    MemoryStatus, NewMemoryRecord, SqliteMemoryError, SqliteMemoryStore,
+};
 use serde::Serialize;
 use tokio::{
     net::TcpListener,
@@ -29,10 +34,12 @@ use crate::{
     store::{ChatStore, clean_optional, new_id},
     tools::ChatToolRuntime,
     types::{
-        AuthSessionResponse, ChatConfigFile, ChatMessageRecord, ChatRole, ChatStateResponse,
-        Conversation, CreateConversationRequest, LoginRequest, ProviderKind, PublicProvider,
-        PublicUser, RegisterRequest, SaveProviderRequest, SendMessageRequest, StoredProvider,
-        UpdateConversationRequest, UpdateSettingsRequest,
+        AuthSessionResponse, ChatConfigFile, ChatMemoryUse, ChatMessageMetadata, ChatMessageRecord,
+        ChatRole, ChatStateResponse, Conversation, CreateConversationRequest, CreateMemoryRequest,
+        ListMemoriesQuery, LoginRequest, MemoryCounts, MemoryListResponse, MemoryStateResponse,
+        ProviderKind, PublicProvider, PublicUser, RegisterRequest, SaveProviderRequest,
+        SendMessageRequest, StoredProvider, UpdateConversationRequest, UpdateMemoryRequest,
+        UpdateMemorySettingsRequest, UpdateSettingsRequest,
     },
 };
 
@@ -64,6 +71,9 @@ pub async fn serve(config: AppConfig) -> anyhow::Result<()> {
         .route("/state", get(get_state))
         .route("/providers", post(save_provider))
         .route("/settings", patch(update_settings))
+        .route("/memory", get(list_memories).post(create_memory))
+        .route("/memory/settings", patch(update_memory_settings))
+        .route("/memory/{id}", patch(update_memory).delete(delete_memory))
         .route(
             "/conversations",
             get(list_conversations)
@@ -136,6 +146,7 @@ async fn get_state(
 ) -> Result<Json<ChatStateResponse>, ApiError> {
     let user = authenticate(&state, &headers)?;
     let store = state.auth.user_chat_store(&user);
+    let memory_store = state.auth.user_memory_store(&user).await?;
     let config = state.chat_config(&store).await?;
     let providers = state.runtime_providers(&config).await;
     let active_provider_id =
@@ -145,6 +156,7 @@ async fn get_state(
         providers: providers.iter().map(PublicProvider::from_stored).collect(),
         active_provider_id,
         theme: config.settings.theme,
+        memory: memory_state(&memory_store).await?,
         conversations,
     }))
 }
@@ -165,8 +177,16 @@ async fn create_conversation(
 ) -> Result<Json<Conversation>, ApiError> {
     let user = authenticate(&state, &headers)?;
     let store = state.auth.user_chat_store(&user);
+    let memory_store = state.auth.user_memory_store(&user).await?;
     let _guard = state.writes.lock().await;
-    Ok(Json(store.create_conversation(request.title).await?))
+    let mut conversation = store.create_conversation(request.title).await?;
+    if let Some(memory_mode) = request.memory_mode {
+        memory_store
+            .set_conversation_mode(&conversation.id, memory_mode)
+            .await?;
+    }
+    attach_memory_mode(&memory_store, &mut conversation).await?;
+    Ok(Json(conversation))
 }
 
 async fn get_conversation(
@@ -180,6 +200,9 @@ async fn get_conversation(
         .get_conversation(&id)
         .await?
         .ok_or_else(|| ApiError::not_found("conversation not found"))?;
+    let memory_store = state.auth.user_memory_store(&user).await?;
+    let mut conversation = conversation;
+    attach_memory_mode(&memory_store, &mut conversation).await?;
     Ok(Json(conversation))
 }
 
@@ -191,6 +214,7 @@ async fn update_conversation(
 ) -> Result<Json<Conversation>, ApiError> {
     let user = authenticate(&state, &headers)?;
     let store = state.auth.user_chat_store(&user);
+    let memory_store = state.auth.user_memory_store(&user).await?;
     let _guard = state.writes.lock().await;
     let mut conversation = store
         .get_conversation(&id)
@@ -201,8 +225,16 @@ async fn update_conversation(
         conversation.pinned = pinned;
         conversation.updated_at = Utc::now();
     }
+    if let Some(memory_mode) = request.memory_mode {
+        memory_store
+            .set_conversation_mode(&conversation.id, memory_mode)
+            .await?;
+        conversation.updated_at = Utc::now();
+    }
 
+    conversation.memory_mode = None;
     store.save_conversation(&conversation).await?;
+    attach_memory_mode(&memory_store, &mut conversation).await?;
     Ok(Json(conversation))
 }
 
@@ -227,6 +259,7 @@ async fn delete_conversations(
 ) -> Result<Json<ChatStateResponse>, ApiError> {
     let user = authenticate(&state, &headers)?;
     let store = state.auth.user_chat_store(&user);
+    let memory_store = state.auth.user_memory_store(&user).await?;
     let _guard = state.writes.lock().await;
     let deleted = store.delete_all_conversations().await?;
     info!(user = %user.id, deleted, "purged chat conversations");
@@ -240,8 +273,106 @@ async fn delete_conversations(
         providers: providers.iter().map(PublicProvider::from_stored).collect(),
         active_provider_id,
         theme: config.settings.theme,
+        memory: memory_state(&memory_store).await?,
         conversations: Vec::new(),
     }))
+}
+
+async fn list_memories(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Query(query): Query<ListMemoriesQuery>,
+) -> Result<Json<MemoryListResponse>, ApiError> {
+    let user = authenticate(&state, &headers)?;
+    let memory_store = state.auth.user_memory_store(&user).await?;
+    let memories = memory_store
+        .list_memories(MemoryListFilter {
+            query: query.query,
+            status: query.status,
+            limit: None,
+        })
+        .await?;
+    Ok(Json(MemoryListResponse { memories }))
+}
+
+async fn create_memory(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateMemoryRequest>,
+) -> Result<Json<MemoryRecord>, ApiError> {
+    let user = authenticate(&state, &headers)?;
+    let memory_store = state.auth.user_memory_store(&user).await?;
+    let memory = memory_store
+        .create_memory(NewMemoryRecord {
+            kind: request.kind,
+            content: request.content,
+            status: request.status.unwrap_or(MemoryStatus::Active),
+            tags: request.tags,
+            source_conversation_id: request.source_conversation_id,
+            source_message_ids: request.source_message_ids,
+            confidence: request.confidence,
+        })
+        .await?;
+    Ok(Json(memory))
+}
+
+async fn update_memory(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<UpdateMemoryRequest>,
+) -> Result<Json<MemoryRecord>, ApiError> {
+    let user = authenticate(&state, &headers)?;
+    let memory_store = state.auth.user_memory_store(&user).await?;
+    let memory = memory_store
+        .update_memory(
+            &id,
+            MemoryRecordPatch {
+                kind: request.kind,
+                content: request.content,
+                status: request.status,
+                tags: request.tags,
+                confidence: request.confidence,
+                source_conversation_id: None,
+                source_message_ids: None,
+            },
+        )
+        .await?
+        .ok_or_else(|| ApiError::not_found("memory not found"))?;
+    Ok(Json(memory))
+}
+
+async fn delete_memory(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let user = authenticate(&state, &headers)?;
+    let memory_store = state.auth.user_memory_store(&user).await?;
+    if memory_store.delete_memory(&id).await? {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    } else {
+        Err(ApiError::not_found("memory not found"))
+    }
+}
+
+async fn update_memory_settings(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateMemorySettingsRequest>,
+) -> Result<Json<MemoryStateResponse>, ApiError> {
+    let user = authenticate(&state, &headers)?;
+    let memory_store = state.auth.user_memory_store(&user).await?;
+    memory_store
+        .update_settings(MemorySettingsPatch {
+            enabled: request.enabled,
+            auto_capture: request.auto_capture,
+            require_approval: request.require_approval,
+            default_conversation_mode: request.default_conversation_mode,
+            memory_budget_chars: request.memory_budget_chars,
+        })
+        .await?;
+    Ok(Json(memory_state(&memory_store).await?))
 }
 
 async fn send_message(
@@ -253,6 +384,7 @@ async fn send_message(
     let content = clean_required(request.content, "message content")?;
     let user = authenticate(&state, &headers)?;
     let store = state.auth.user_chat_store(&user);
+    let memory_store = state.auth.user_memory_store(&user).await?;
     let _guard = state.writes.lock().await;
     let config = state.chat_config(&store).await?;
     let providers = state.runtime_providers(&config).await;
@@ -280,6 +412,7 @@ async fn send_message(
         .await?
         .ok_or_else(|| ApiError::not_found("conversation not found"))?;
     let now = Utc::now();
+    let memory_query = content.clone();
     conversation.messages.push(ChatMessageRecord {
         id: new_id("msg"),
         role: ChatRole::User,
@@ -291,10 +424,13 @@ async fn send_message(
     conversation.title = conversation_title(&conversation);
     conversation.updated_at = now;
     store.save_conversation(&conversation).await?;
+    let memory_selection =
+        select_memory_context(&memory_store, &conversation.id, &memory_query).await?;
 
     let response = match model::complete_chat(
         provider,
         &conversation.messages,
+        memory_selection.prompt.as_deref(),
         state.config.model_timeout,
         state.config.model_context_max_chars,
     )
@@ -308,16 +444,31 @@ async fn send_message(
     };
 
     let now = Utc::now();
+    let assistant_message_id = new_id("msg");
+    let metadata = memory_metadata(&memory_selection.memories).into_option();
     conversation.messages.push(ChatMessageRecord {
-        id: new_id("msg"),
+        id: assistant_message_id.clone(),
         role: ChatRole::Assistant,
         content: response,
         created_at: now,
         provider_id: Some(provider.id.clone()),
-        metadata: None,
+        metadata,
     });
     conversation.updated_at = now;
     store.save_conversation(&conversation).await?;
+    record_memory_usage(
+        &memory_store,
+        &memory_selection.memories,
+        &conversation.id,
+        &assistant_message_id,
+    )
+    .await?;
+    spawn_memory_capture(
+        memory_store,
+        provider.clone(),
+        conversation.clone(),
+        state.config.model_timeout,
+    );
 
     Ok(Json(conversation))
 }
@@ -357,6 +508,7 @@ async fn stream_message_worker(
     tx: mpsc::UnboundedSender<ChatStreamEvent>,
 ) -> anyhow::Result<()> {
     let store = state.auth.user_chat_store(&user);
+    let memory_store = state.auth.user_memory_store(&user).await?;
     let _guard = state.writes.lock().await;
     let config = store
         .load_or_initialize_config(&state.config.default_provider)
@@ -384,6 +536,7 @@ async fn stream_message_worker(
         .await?
         .ok_or_else(|| anyhow::anyhow!("conversation not found"))?;
     let now = Utc::now();
+    let memory_query = content.clone();
     conversation.messages.push(ChatMessageRecord {
         id: new_id("msg"),
         role: ChatRole::User,
@@ -398,10 +551,13 @@ async fn stream_message_worker(
     let _ = tx.send(ChatStreamEvent::Conversation {
         conversation: conversation.clone(),
     });
+    let memory_selection =
+        select_memory_context(&memory_store, &conversation.id, &memory_query).await?;
 
     let assistant_response = model::stream_chat(
         &provider,
         &conversation.messages,
+        memory_selection.prompt.as_deref(),
         state.config.model_timeout,
         state.config.model_context_max_chars,
         state.tools.as_ref(),
@@ -419,16 +575,32 @@ async fn stream_message_worker(
     .await?;
 
     let now = Utc::now();
+    let assistant_message_id = new_id("msg");
+    let mut metadata = assistant_response.metadata.unwrap_or_default();
+    metadata.merge(memory_metadata(&memory_selection.memories));
     conversation.messages.push(ChatMessageRecord {
-        id: new_id("msg"),
+        id: assistant_message_id.clone(),
         role: ChatRole::Assistant,
         content: assistant_response.content,
         created_at: now,
         provider_id: Some(provider.id.clone()),
-        metadata: assistant_response.metadata,
+        metadata: metadata.into_option(),
     });
     conversation.updated_at = now;
     store.save_conversation(&conversation).await?;
+    record_memory_usage(
+        &memory_store,
+        &memory_selection.memories,
+        &conversation.id,
+        &assistant_message_id,
+    )
+    .await?;
+    spawn_memory_capture(
+        memory_store,
+        provider.clone(),
+        conversation.clone(),
+        state.config.model_timeout,
+    );
     let _ = tx.send(ChatStreamEvent::Conversation { conversation });
     let _ = tx.send(ChatStreamEvent::Done);
 
@@ -475,6 +647,7 @@ async fn update_settings(
 ) -> Result<Json<ChatStateResponse>, ApiError> {
     let user = authenticate(&state, &headers)?;
     let store = state.auth.user_chat_store(&user);
+    let memory_store = state.auth.user_memory_store(&user).await?;
     let _guard = state.writes.lock().await;
     let mut config = state.chat_config(&store).await?;
     let providers = state.runtime_providers(&config).await;
@@ -511,8 +684,192 @@ async fn update_settings(
         providers: providers.iter().map(PublicProvider::from_stored).collect(),
         active_provider_id,
         theme: config.settings.theme,
+        memory: memory_state(&memory_store).await?,
         conversations,
     }))
+}
+
+#[derive(Debug)]
+struct MemorySelection {
+    prompt: Option<String>,
+    memories: Vec<MemoryRecord>,
+}
+
+async fn memory_state(store: &SqliteMemoryStore) -> Result<MemoryStateResponse, SqliteMemoryError> {
+    let settings = store.settings().await?;
+    let memories = store
+        .list_memories(MemoryListFilter {
+            query: None,
+            status: None,
+            limit: Some(1_000),
+        })
+        .await?;
+    let mut counts = MemoryCounts::default();
+    for memory in memories {
+        match memory.status {
+            MemoryStatus::Pending => counts.pending += 1,
+            MemoryStatus::Active => counts.active += 1,
+            MemoryStatus::Archived => counts.archived += 1,
+        }
+    }
+
+    Ok(MemoryStateResponse { settings, counts })
+}
+
+async fn attach_memory_mode(
+    store: &SqliteMemoryStore,
+    conversation: &mut Conversation,
+) -> Result<(), SqliteMemoryError> {
+    conversation.memory_mode = Some(store.conversation_mode(&conversation.id).await?);
+    Ok(())
+}
+
+async fn select_memory_context(
+    store: &SqliteMemoryStore,
+    conversation_id: &str,
+    query: &str,
+) -> Result<MemorySelection, SqliteMemoryError> {
+    let settings = store.settings().await?;
+    let mode = store.conversation_mode(conversation_id).await?;
+    if !settings.enabled || mode == ConversationMemoryMode::NoMemory {
+        return Ok(MemorySelection {
+            prompt: None,
+            memories: Vec::new(),
+        });
+    }
+
+    let memories = store
+        .retrieve_memories(query, settings.memory_budget_chars, None)
+        .await?;
+    let prompt = if memories.is_empty() {
+        None
+    } else {
+        Some(memory_prompt(&memories))
+    };
+    Ok(MemorySelection { prompt, memories })
+}
+
+fn memory_prompt(memories: &[MemoryRecord]) -> String {
+    let mut prompt = String::from(
+        "User-approved long-term memory is available below. Treat it as editable user context, not guaranteed truth. If the current chat conflicts with memory, prefer the current chat and say so briefly when relevant.\n\n",
+    );
+    for memory in memories {
+        let tags = if memory.tags.is_empty() {
+            String::new()
+        } else {
+            format!(" tags: {}", memory.tags.join(", "))
+        };
+        prompt.push_str(&format!(
+            "- [{}] {}{}: {}\n",
+            memory.id, memory.kind, tags, memory.content
+        ));
+    }
+    prompt
+}
+
+fn memory_metadata(memories: &[MemoryRecord]) -> ChatMessageMetadata {
+    ChatMessageMetadata {
+        memories: memories
+            .iter()
+            .map(|memory| ChatMemoryUse {
+                id: memory.id.clone(),
+                kind: memory.kind.clone(),
+                content: memory.content.clone(),
+            })
+            .collect(),
+        ..ChatMessageMetadata::default()
+    }
+}
+
+async fn record_memory_usage(
+    store: &SqliteMemoryStore,
+    memories: &[MemoryRecord],
+    conversation_id: &str,
+    message_id: &str,
+) -> Result<(), SqliteMemoryError> {
+    let memory_ids = memories
+        .iter()
+        .map(|memory| memory.id.clone())
+        .collect::<Vec<_>>();
+    store
+        .record_usage(&memory_ids, conversation_id, Some(message_id))
+        .await
+}
+
+fn spawn_memory_capture(
+    store: SqliteMemoryStore,
+    provider: StoredProvider,
+    conversation: Conversation,
+    timeout: std::time::Duration,
+) {
+    tokio::spawn(async move {
+        if let Err(err) = capture_memories(store, provider, conversation, timeout).await {
+            warn!(error = %err, "memory capture failed");
+        }
+    });
+}
+
+async fn capture_memories(
+    store: SqliteMemoryStore,
+    provider: StoredProvider,
+    conversation: Conversation,
+    timeout: std::time::Duration,
+) -> anyhow::Result<()> {
+    let settings = store.settings().await?;
+    let mode = store.conversation_mode(&conversation.id).await?;
+    if !settings.enabled || !settings.auto_capture || mode == ConversationMemoryMode::NoMemory {
+        return Ok(());
+    }
+
+    let candidates = model::extract_memory_candidates(&provider, &conversation.messages, timeout)
+        .await
+        .context("failed to extract memory candidates")?;
+    let status = if settings.require_approval {
+        MemoryStatus::Pending
+    } else {
+        MemoryStatus::Active
+    };
+    let source_message_ids = conversation
+        .messages
+        .iter()
+        .rev()
+        .take(2)
+        .map(|message| message.id.clone())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
+
+    for candidate in candidates {
+        let existing = store
+            .list_memories(MemoryListFilter {
+                query: Some(candidate.content.clone()),
+                status: None,
+                limit: Some(12),
+            })
+            .await?;
+        if existing.iter().any(|memory| {
+            memory
+                .content
+                .trim()
+                .eq_ignore_ascii_case(candidate.content.trim())
+        }) {
+            continue;
+        }
+        store
+            .create_memory(NewMemoryRecord {
+                kind: candidate.kind,
+                content: candidate.content,
+                status,
+                tags: candidate.tags,
+                source_conversation_id: Some(conversation.id.clone()),
+                source_message_ids: source_message_ids.clone(),
+                confidence: candidate.confidence,
+            })
+            .await?;
+    }
+
+    Ok(())
 }
 
 impl ServerState {
@@ -811,6 +1168,12 @@ impl From<anyhow::Error> for ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: "internal server error".to_owned(),
         }
+    }
+}
+
+impl From<SqliteMemoryError> for ApiError {
+    fn from(error: SqliteMemoryError) -> Self {
+        ApiError::from(anyhow::Error::new(error))
     }
 }
 
