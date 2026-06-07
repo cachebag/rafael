@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 
+pub mod sqlite;
+
 #[derive(Debug, Error)]
 pub enum MemoryError {
     #[error("invalid memory component: {0}")]
