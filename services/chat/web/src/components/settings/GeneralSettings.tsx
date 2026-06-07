@@ -47,7 +47,10 @@ export function GeneralSettings({
     <section className="settings-section">
       <h3 className="settings-section-title">General</h3>
       <div className="settings-grid settings-grid-two">
-        <Field label="Active model">
+        <Field
+          label="Active model"
+          description="The model Rafael uses for the next messages you send."
+        >
           <SelectControl
             value={activeProviderId}
             options={providerOptions}
@@ -56,7 +59,7 @@ export function GeneralSettings({
             onChange={onProviderChange}
           />
         </Field>
-        <Field label="Theme">
+        <Field label="Theme" description="Changes the color palette for this browser.">
           <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
             <SelectControl
               value={themeBase(theme)}

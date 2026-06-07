@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { CircleHelp } from "lucide-react";
 import { CustomSelect, type CustomSelectOption } from "../CustomSelect";
 
 export function SelectControl({
@@ -30,11 +31,13 @@ export function SelectControl({
 
 export function ToggleField({
   label,
+  description,
   checked,
   disabled,
   onChange
 }: {
   label: string;
+  description?: string;
   checked: boolean;
   disabled: boolean;
   onChange: (checked: boolean) => void;
@@ -48,7 +51,10 @@ export function ToggleField({
         disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
       />
-      <span className="settings-toggle-copy">{label}</span>
+      <span className="settings-toggle-copy">
+        {label}
+        {description !== undefined ? <InfoTip text={description} /> : null}
+      </span>
       <span className="settings-toggle-switch" aria-hidden="true">
         <span className="settings-toggle-thumb" />
       </span>
@@ -58,18 +64,31 @@ export function ToggleField({
 
 export function Field({
   label,
+  description,
   children,
   className
 }: {
   label: string;
+  description?: string;
   children: ReactNode;
   className?: string;
 }) {
   return (
     <div className={["grid gap-2", className ?? ""].join(" ")}>
-      <span className="control-label">{label}</span>
+      <span className="control-label">
+        {label}
+        {description !== undefined ? <InfoTip text={description} /> : null}
+      </span>
       {children}
     </div>
+  );
+}
+
+export function InfoTip({ text }: { text: string }) {
+  return (
+    <span className="info-tip" tabIndex={0} aria-label={text} data-tooltip={text}>
+      <CircleHelp aria-hidden="true" size={13} strokeWidth={2.1} />
+    </span>
   );
 }
 

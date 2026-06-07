@@ -177,18 +177,21 @@ export function MemorySettings({
         <div className="memory-toggle-grid">
           <ToggleField
             label="Enabled"
+            description="Allows this user account to retrieve saved memories during normal chats."
             checked={memoryState.settings.enabled}
             disabled={controlsDisabled}
             onChange={(checked) => void updateMemorySettings({ enabled: checked })}
           />
           <ToggleField
             label="Auto capture"
+            description="Lets Rafael create memories from conversations when something looks useful long term."
             checked={memoryState.settings.autoCapture}
             disabled={controlsDisabled || !memoryState.settings.enabled}
             onChange={(checked) => void updateMemorySettings({ autoCapture: checked })}
           />
           <ToggleField
             label="Require approval"
+            description="Keeps captured memories pending until you approve them."
             checked={memoryState.settings.requireApproval}
             disabled={controlsDisabled || !memoryState.settings.enabled}
             onChange={(checked) =>
@@ -197,7 +200,10 @@ export function MemorySettings({
           />
         </div>
         <div className="memory-policy-fields">
-          <Field label="New chats">
+          <Field
+            label="New chats"
+            description="Default memory behavior for new conversations."
+          >
             <SelectControl
               value={memoryState.settings.defaultConversationMode}
               options={memoryModeOptions}
@@ -210,7 +216,10 @@ export function MemorySettings({
               }
             />
           </Field>
-          <Field label="Context budget">
+          <Field
+            label="Context budget"
+            description="Maximum characters of memory context Rafael can add to one model request."
+          >
             <input
               className="control"
               type="number"
@@ -238,7 +247,10 @@ export function MemorySettings({
         </div>
         <div className="memory-manager">
           <div className="memory-toolbar">
-            <Field label="Search">
+            <Field
+              label="Search"
+              description="Find saved memories by their text, kind, or tags."
+            >
               <input
                 className="control"
                 value={memoryQuery}
@@ -247,7 +259,10 @@ export function MemorySettings({
                 onChange={(event) => setMemoryQuery(event.target.value)}
               />
             </Field>
-            <Field label="Status">
+            <Field
+              label="Status"
+              description="Filter memories by whether they are active, pending review, or archived."
+            >
               <SelectControl
                 value={memoryStatus}
                 options={memoryFilterOptions}
@@ -261,24 +276,36 @@ export function MemorySettings({
           <section className="memory-subsection">
             <h4 className="memory-subsection-title">Add memory</h4>
             <div className="memory-create-row">
-              <Field label="Kind">
-                <input
-                  className="control"
-                  value={newMemoryKind}
-                  disabled={controlsDisabled}
-                  onChange={(event) => setNewMemoryKind(event.target.value)}
-                />
-              </Field>
-              <Field label="Tags">
-                <input
-                  className="control"
-                  value={newMemoryTags}
-                  placeholder="tags"
-                  disabled={controlsDisabled}
-                  onChange={(event) => setNewMemoryTags(event.target.value)}
-                />
-              </Field>
-              <Field label="Memory" className="memory-content-field">
+              <div className="memory-create-meta">
+                <Field
+                  label="Kind"
+                  description="A short category for the memory, like preference, project, fact, or habit."
+                >
+                  <input
+                    className="control"
+                    value={newMemoryKind}
+                    disabled={controlsDisabled}
+                    onChange={(event) => setNewMemoryKind(event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label="Tags"
+                  description="Optional labels for grouping or finding related memories later."
+                >
+                  <input
+                    className="control"
+                    value={newMemoryTags}
+                    placeholder="tags"
+                    disabled={controlsDisabled}
+                    onChange={(event) => setNewMemoryTags(event.target.value)}
+                  />
+                </Field>
+              </div>
+              <Field
+                label="Memory"
+                className="memory-content-field"
+                description="The actual saved note Rafael may retrieve and inject when relevant."
+              >
                 <textarea
                   className="control memory-content-input"
                   value={newMemoryContent}
@@ -288,15 +315,17 @@ export function MemorySettings({
                   onChange={(event) => setNewMemoryContent(event.target.value)}
                 />
               </Field>
-              <button
-                type="button"
-                className="button-secondary memory-add-button"
-                disabled={controlsDisabled || newMemoryContent.trim() === ""}
-                onClick={() => void addMemory()}
-              >
-                <Plus aria-hidden="true" size={15} strokeWidth={2.1} />
-                Add
-              </button>
+              <div className="memory-create-actions">
+                <button
+                  type="button"
+                  className="button-secondary memory-add-button"
+                  disabled={controlsDisabled || newMemoryContent.trim() === ""}
+                  onClick={() => void addMemory()}
+                >
+                  <Plus aria-hidden="true" size={15} strokeWidth={2.1} />
+                  Add memory
+                </button>
+              </div>
             </div>
           </section>
 

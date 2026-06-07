@@ -15,6 +15,7 @@ interface CustomSelectProps {
   ariaLabel: string;
   className?: string;
   menuClassName?: string;
+  showSelectedDetail?: boolean;
   onChange: (value: string) => void;
 }
 
@@ -25,6 +26,7 @@ export function CustomSelect({
   ariaLabel,
   className,
   menuClassName,
+  showSelectedDetail = false,
   onChange
 }: CustomSelectProps) {
   const [open, setOpen] = useState(false);
@@ -85,7 +87,7 @@ export function CustomSelect({
           <span className="custom-select-label">
             {selectedOption?.label ?? "No options"}
           </span>
-          {selectedOption?.detail !== undefined ? (
+          {showSelectedDetail && selectedOption?.detail !== undefined ? (
             <span className="custom-select-detail">{selectedOption.detail}</span>
           ) : null}
         </span>
