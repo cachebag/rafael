@@ -505,6 +505,7 @@ input:disabled {
 .settings-modal {
   display: flex;
   width: min(46rem, 100%);
+  height: min(44rem, calc(100dvh - 2rem));
   max-height: calc(100dvh - 2rem);
   flex-direction: column;
   overflow: hidden;
@@ -1521,6 +1522,7 @@ input:disabled {
 
   .settings-modal {
     width: 100%;
+    height: 100dvh;
     max-height: 100dvh;
     border-right: 0;
     border-left: 0;
@@ -1559,6 +1561,7 @@ input:disabled {
 
   .settings-modal {
     width: min(58rem, calc(100vw - 2rem));
+    height: min(44rem, calc(100dvh - 2rem));
   }
 
   .settings-body {
