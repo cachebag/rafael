@@ -13,6 +13,7 @@ import {
   setStoredAuthToken,
   streamMessage,
   updateConversation,
+  updateMemorySettings,
   updateSettings
 } from "./api";
 import { AuthPanel } from "./components/AuthPanel";
@@ -25,9 +26,12 @@ import type {
   AuthUser,
   ChatMessageRecord,
   ChatState,
+  ConversationMemoryMode,
   Conversation,
+  MemoryState,
   ToolActivity,
-  ThemeName
+  ThemeName,
+  UpdateMemorySettingsRequest
 } from "./types";
 
 type LoadState = "idle" | "loading" | "ready" | "failed";
@@ -37,6 +41,7 @@ export default function App() {
   const [state, setState] = useState<ChatState | null>(null);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [pendingMemoryMode, setPendingMemoryMode] = useState<ConversationMemoryMode | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => isMobileViewport());
   const [sidebarMounted, setSidebarMounted] = useState(() => !isMobileViewport());
@@ -179,6 +184,7 @@ export default function App() {
       const nextConversation = await createConversation();
       setConversation(nextConversation);
       setSelectedConversationId(nextConversation.id);
+      setPendingMemoryMode(null);
       if (isMobile) {
         closeSidebar();
       }
@@ -224,16 +230,38 @@ export default function App() {
     }
   }
 
+  async function handleMemoryModeChange(mode: ConversationMemoryMode): Promise<void> {
+    setError(null);
+    if (conversation === null) {
+      setPendingMemoryMode(mode);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const updatedConversation = await updateConversation(conversation.id, { memoryMode: mode });
+      setConversation(updatedConversation);
+      await refreshState();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "failed to update memory mode");
+      throw cause;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleSend(content: string): Promise<void> {
     setBusy(true);
     setError(null);
     setToolActivity(null);
     let attemptedConversationId = conversation?.id ?? null;
     try {
-      const currentConversation = conversation ?? (await createConversation());
+      const currentConversation =
+        conversation ?? (await createConversation(undefined, pendingMemoryMode ?? undefined));
       attemptedConversationId = currentConversation.id;
       if (conversation === null) {
         setSelectedConversationId(currentConversation.id);
+        setPendingMemoryMode(null);
       }
       setConversation(optimisticConversation(currentConversation, content, activeProvider?.id));
       await streamMessage(
@@ -341,6 +369,20 @@ export default function App() {
     }
   }
 
+  async function handleMemorySettingsChange(
+    settings: UpdateMemorySettingsRequest
+  ): Promise<MemoryState> {
+    setError(null);
+    try {
+      const memory = await updateMemorySettings(settings);
+      setState((current) => (current === null ? current : { ...current, memory }));
+      return memory;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "failed to update memory settings");
+      throw cause;
+    }
+  }
+
   async function handlePurgeConversations(): Promise<void> {
     setBusy(true);
     setError(null);
@@ -351,6 +393,7 @@ export default function App() {
       applyTheme(nextState.theme);
       setConversation(null);
       setSelectedConversationId(null);
+      setPendingMemoryMode(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "failed to purge chats");
       throw cause;
@@ -368,6 +411,7 @@ export default function App() {
     setState(nextState);
     setConversation(null);
     setSelectedConversationId(null);
+    setPendingMemoryMode(null);
   }
 
   async function handleLogin(username: string, password: string): Promise<void> {
@@ -408,6 +452,7 @@ export default function App() {
     setState(null);
     setConversation(null);
     setSelectedConversationId(null);
+    setPendingMemoryMode(null);
     setSettingsOpen(false);
     setError(null);
     setAuthError(null);
@@ -471,12 +516,20 @@ export default function App() {
         <ChatPanel
           conversation={conversation}
           activeProvider={activeProvider}
+          memoryEnabled={state?.memory.settings.enabled ?? false}
+          memoryMode={
+            conversation?.memoryMode ??
+            pendingMemoryMode ??
+            state?.memory.settings.defaultConversationMode ??
+            "normal"
+          }
           busy={busy}
           toolActivity={toolActivity}
           error={error}
           loading={loading}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={toggleSidebar}
+          onMemoryModeChange={handleMemoryModeChange}
           onSend={handleSend}
         />
       </div>
@@ -486,11 +539,16 @@ export default function App() {
           activeProviderId={state.activeProviderId}
           user={user}
           conversationCount={state.conversations.length}
+          memory={state.memory}
           busy={busy}
           theme={state.theme}
           onClose={() => setSettingsOpen(false)}
           onProviderChange={handleProviderChange}
           onThemeChange={handleThemeChange}
+          onMemorySettingsChange={handleMemorySettingsChange}
+          onMemoryChanged={async () => {
+            await refreshState();
+          }}
           onPurgeConversations={handlePurgeConversations}
           onLogout={handleLogout}
         />

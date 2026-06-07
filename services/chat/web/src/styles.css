@@ -637,6 +637,107 @@ input:disabled {
   border-color: color-mix(in srgb, var(--danger) 34%, var(--line));
 }
 
+.settings-toggle-row {
+  display: flex;
+  min-height: 2.5rem;
+  align-items: center;
+  gap: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--input) 48%, transparent);
+  color: var(--text);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.settings-toggle-row input {
+  accent-color: var(--accent);
+}
+
+.settings-memory-count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.memory-manager,
+.memory-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.memory-toolbar {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.memory-create-row {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--line) 68%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--input) 36%, transparent);
+  padding: 0.75rem;
+}
+
+.memory-content-input {
+  min-height: 4.5rem;
+  resize: vertical;
+}
+
+.memory-add-button,
+.memory-row-actions .button-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.memory-row {
+  display: grid;
+  gap: 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel-soft) 58%, transparent);
+  padding: 0.75rem;
+}
+
+.memory-row-header {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.memory-row-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.4rem;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-row-title svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.memory-row-grid {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.memory-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
 .copy-button {
   display: inline-flex;
   align-items: center;
@@ -830,6 +931,49 @@ input:disabled {
 
 .message-source-links a:hover {
   color: var(--accent-hover);
+}
+
+.message-memory-footer {
+  margin-top: 0.1rem;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.message-memory-footer summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  list-style: none;
+}
+
+.message-memory-footer summary::-webkit-details-marker {
+  display: none;
+}
+
+.message-memory-footer svg {
+  opacity: 0.72;
+}
+
+.message-memory-list {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 72%, transparent);
+  padding-left: 0.65rem;
+}
+
+.message-memory-list p {
+  display: grid;
+  gap: 0.15rem;
+  margin: 0;
+}
+
+.message-memory-list span {
+  color: var(--accent);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .message-output-actions {
@@ -1350,6 +1494,17 @@ input:disabled {
 
   .settings-grid-two {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .memory-toolbar,
+  .memory-row-header,
+  .memory-row-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(10rem, 0.45fr);
+  }
+
+  .memory-create-row {
+    grid-template-columns: minmax(8rem, 0.35fr) minmax(8rem, 0.35fr) minmax(0, 1fr) auto;
+    align-items: start;
   }
 
   .settings-danger-layout {

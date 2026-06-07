@@ -2,10 +2,17 @@ import type {
   AuthSession,
   AuthUser,
   ChatState,
+  ConversationMemoryMode,
+  CreateMemoryRequest,
   Conversation,
+  MemoryRecord,
+  MemoryState,
+  MemoryStatus,
   PublicProvider,
   SaveProviderRequest,
   ToolActivity,
+  UpdateMemoryRequest,
+  UpdateMemorySettingsRequest,
   UpdateSettingsRequest
 } from "./types";
 
@@ -66,10 +73,13 @@ export async function getState(): Promise<ChatState> {
   return request<ChatState>("/api/state");
 }
 
-export async function createConversation(title?: string): Promise<Conversation> {
+export async function createConversation(
+  title?: string,
+  memoryMode?: ConversationMemoryMode
+): Promise<Conversation> {
   return request<Conversation>("/api/conversations", {
     method: "POST",
-    body: { title }
+    body: { title, memoryMode }
   });
 }
 
@@ -91,11 +101,11 @@ export async function purgeConversations(): Promise<ChatState> {
 
 export async function updateConversation(
   id: string,
-  updates: { pinned?: boolean }
+  updates: { pinned?: boolean; memoryMode?: ConversationMemoryMode }
 ): Promise<Conversation> {
   return request<Conversation>(`/api/conversations/${encodeURIComponent(id)}`, {
     method: "PATCH",
-    body: { pinned: updates.pinned }
+    body: { pinned: updates.pinned, memoryMode: updates.memoryMode }
   });
 }
 
@@ -155,6 +165,53 @@ export async function saveProvider(
   return request<PublicProvider>("/api/providers", {
     method: "POST",
     body: providerToJson(provider)
+  });
+}
+
+export async function listMemories(
+  filters: { query?: string; status?: MemoryStatus } = {}
+): Promise<MemoryRecord[]> {
+  const params = new URLSearchParams();
+  if (filters.query !== undefined && filters.query.trim() !== "") {
+    params.set("query", filters.query);
+  }
+  if (filters.status !== undefined) {
+    params.set("status", filters.status);
+  }
+  const suffix = params.toString() === "" ? "" : `?${params.toString()}`;
+  const response = await request<{ memories: MemoryRecord[] }>(`/api/memory${suffix}`);
+  return response.memories;
+}
+
+export async function createMemory(memory: CreateMemoryRequest): Promise<MemoryRecord> {
+  return request<MemoryRecord>("/api/memory", {
+    method: "POST",
+    body: memoryToJson(memory)
+  });
+}
+
+export async function updateMemory(
+  id: string,
+  updates: UpdateMemoryRequest
+): Promise<MemoryRecord> {
+  return request<MemoryRecord>(`/api/memory/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: memoryPatchToJson(updates)
+  });
+}
+
+export async function deleteMemory(id: string): Promise<void> {
+  await request<void>(`/api/memory/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function updateMemorySettings(
+  settings: UpdateMemorySettingsRequest
+): Promise<MemoryState> {
+  return request<MemoryState>("/api/memory/settings", {
+    method: "PATCH",
+    body: memorySettingsToJson(settings)
   });
 }
 
@@ -319,5 +376,37 @@ function settingsToJson(settings: UpdateSettingsRequest): JsonValue {
   return {
     activeProviderId: settings.activeProviderId,
     theme: settings.theme
+  };
+}
+
+function memorySettingsToJson(settings: UpdateMemorySettingsRequest): JsonValue {
+  return {
+    enabled: settings.enabled,
+    autoCapture: settings.autoCapture,
+    requireApproval: settings.requireApproval,
+    defaultConversationMode: settings.defaultConversationMode,
+    memoryBudgetChars: settings.memoryBudgetChars
+  };
+}
+
+function memoryToJson(memory: CreateMemoryRequest): JsonValue {
+  return {
+    kind: memory.kind,
+    content: memory.content,
+    status: memory.status,
+    tags: memory.tags,
+    sourceConversationId: memory.sourceConversationId,
+    sourceMessageIds: memory.sourceMessageIds,
+    confidence: memory.confidence
+  };
+}
+
+function memoryPatchToJson(memory: UpdateMemoryRequest): JsonValue {
+  return {
+    kind: memory.kind,
+    content: memory.content,
+    status: memory.status,
+    tags: memory.tags,
+    confidence: memory.confidence
   };
 }

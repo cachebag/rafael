@@ -1,33 +1,44 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PanelLeftOpen, SendHorizontal } from "lucide-react";
+import { Database, PanelLeftOpen, SendHorizontal } from "lucide-react";
 import {
   compactModelName,
   providerConnectionTitle
 } from "../display";
-import type { Conversation, PublicProvider, ToolActivity } from "../types";
+import type {
+  Conversation,
+  ConversationMemoryMode,
+  PublicProvider,
+  ToolActivity
+} from "../types";
 import { MessageThread } from "./MessageThread";
 
 interface ChatPanelProps {
   conversation: Conversation | null;
   activeProvider: PublicProvider | null;
+  memoryEnabled: boolean;
+  memoryMode: ConversationMemoryMode;
   busy: boolean;
   toolActivity: ToolActivity | null;
   error: string | null;
   loading: "idle" | "loading" | "ready" | "failed";
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
+  onMemoryModeChange: (mode: ConversationMemoryMode) => Promise<void>;
   onSend: (content: string) => Promise<void>;
 }
 
 export function ChatPanel({
   conversation,
   activeProvider,
+  memoryEnabled,
+  memoryMode,
   busy,
   toolActivity,
   error,
   loading,
   sidebarCollapsed,
   onToggleSidebar,
+  onMemoryModeChange,
   onSend
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
@@ -39,6 +50,7 @@ export function ChatPanel({
   const canSend = draft.trim().length > 0 && !busy && activeProvider?.chatSupported === true;
   const modelLabel =
     activeProvider === null ? "No model selected" : compactModelName(activeProvider.model);
+  const nextMemoryMode = memoryMode === "no_memory" ? "normal" : "no_memory";
   const streamPositionKey = useMemo(() => {
     const lastMessage = conversation?.messages.at(-1);
     return `${conversation?.id ?? "none"}:${lastMessage?.id ?? "none"}:${lastMessage?.content.length ?? 0}`;
@@ -147,6 +159,22 @@ export function ChatPanel({
               </p>
             </div>
           </div>
+          <button
+            type="button"
+            className="theme-mode-button shrink-0"
+            disabled={busy || !memoryEnabled}
+            title={
+              !memoryEnabled
+                ? "Memory is disabled"
+                : memoryMode === "no_memory"
+                  ? "Use memory"
+                  : "Disable memory for this chat"
+            }
+            onClick={() => void onMemoryModeChange(nextMemoryMode)}
+          >
+            <Database aria-hidden="true" size={15} strokeWidth={2.1} />
+            {!memoryEnabled ? "Memory off" : memoryMode === "no_memory" ? "No memory" : "Memory"}
+          </button>
         </div>
       </header>
 

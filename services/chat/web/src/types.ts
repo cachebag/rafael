@@ -3,6 +3,8 @@ export type ThemeName = "charcoal" | "charcoal_light" | "gruvbox" | "gruvbox_lig
 export type ProviderKind = "open_ai_compatible" | "anthropic";
 
 export type ChatRole = "user" | "assistant" | "system";
+export type MemoryStatus = "pending" | "active" | "archived";
+export type ConversationMemoryMode = "normal" | "no_memory";
 
 export interface AuthUser {
   id: string;
@@ -47,6 +49,7 @@ export interface ChatMessageRecord {
 export interface ChatMessageMetadata {
   toolUses?: ChatToolUse[];
   sources?: ChatSource[];
+  memories?: ChatMemoryUse[];
 }
 
 export interface ChatToolUse {
@@ -62,6 +65,7 @@ export interface Conversation {
   id: string;
   title: string;
   pinned: boolean;
+  memoryMode?: ConversationMemoryMode;
   createdAt: string;
   updatedAt: string;
   messages: ChatMessageRecord[];
@@ -71,6 +75,7 @@ export interface ChatState {
   providers: PublicProvider[];
   activeProviderId: string;
   theme: ThemeName;
+  memory: MemoryState;
   conversations: ConversationSummary[];
 }
 
@@ -91,4 +96,71 @@ export interface UpdateSettingsRequest {
 
 export interface ToolActivity {
   name: string;
+}
+
+export interface ChatMemoryUse {
+  id: string;
+  kind: string;
+  content: string;
+}
+
+export interface MemorySettings {
+  enabled: boolean;
+  autoCapture: boolean;
+  requireApproval: boolean;
+  defaultConversationMode: ConversationMemoryMode;
+  memoryBudgetChars: number;
+  updatedAt: string;
+}
+
+export interface MemoryCounts {
+  pending: number;
+  active: number;
+  archived: number;
+}
+
+export interface MemoryState {
+  settings: MemorySettings;
+  counts: MemoryCounts;
+}
+
+export interface MemoryRecord {
+  id: string;
+  kind: string;
+  content: string;
+  status: MemoryStatus;
+  tags: string[];
+  sourceConversationId?: string;
+  sourceMessageIds: string[];
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string;
+  confidence?: number;
+  userEdited: boolean;
+}
+
+export interface UpdateMemorySettingsRequest {
+  enabled?: boolean;
+  autoCapture?: boolean;
+  requireApproval?: boolean;
+  defaultConversationMode?: ConversationMemoryMode;
+  memoryBudgetChars?: number;
+}
+
+export interface CreateMemoryRequest {
+  kind: string;
+  content: string;
+  status?: MemoryStatus;
+  tags?: string[];
+  sourceConversationId?: string;
+  sourceMessageIds?: string[];
+  confidence?: number;
+}
+
+export interface UpdateMemoryRequest {
+  kind?: string;
+  content?: string;
+  status?: MemoryStatus;
+  tags?: string[];
+  confidence?: number | null;
 }

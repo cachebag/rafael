@@ -1,6 +1,12 @@
 import { memo } from "react";
-import { Globe2 } from "lucide-react";
-import type { ChatMessageMetadata, ChatMessageRecord, ChatSource, ToolActivity } from "../types";
+import { Database, Globe2 } from "lucide-react";
+import type {
+  ChatMemoryUse,
+  ChatMessageMetadata,
+  ChatMessageRecord,
+  ChatSource,
+  ToolActivity
+} from "../types";
 import { ActivityIndicator, ToolActivityIndicator } from "./ActivityIndicator";
 import { LazyCopyButton } from "./LazyCopyButton";
 import { MarkdownContent } from "./MarkdownContent";
@@ -106,7 +112,9 @@ interface MessageMetadataFooterProps {
 }
 
 function MessageMetadataFooter({ metadata }: MessageMetadataFooterProps) {
-  if (!hasWebToolUse(metadata)) {
+  const memories = uniqueMemories(metadata?.memories ?? []);
+  const hasWeb = hasWebToolUse(metadata);
+  if (!hasWeb && memories.length === 0) {
     return null;
   }
 
@@ -114,25 +122,45 @@ function MessageMetadataFooter({ metadata }: MessageMetadataFooterProps) {
   const sourceCount = uniqueSources(metadata?.sources ?? []).length;
 
   return (
-    <footer className="message-source-footer" aria-label="Web source note">
-      <Globe2 aria-hidden="true" size={13} strokeWidth={1.8} />
-      <span>searched web</span>
-      {sourceCount > 0 ? <span>{sourceCount} sources</span> : null}
-      <span>sources may be incomplete</span>
-      {sources.length > 0 ? (
-        <span className="message-source-links">
-          {sources.map((source) => (
-            <a
-              key={source.url}
-              href={source.url}
-              target="_blank"
-              rel="noreferrer"
-              title={source.title ?? source.url}
-            >
-              {sourceLabel(source)}
-            </a>
-          ))}
-        </span>
+    <footer className="grid gap-2">
+      {hasWeb ? (
+        <div className="message-source-footer" aria-label="Web source note">
+          <Globe2 aria-hidden="true" size={13} strokeWidth={1.8} />
+          <span>searched web</span>
+          {sourceCount > 0 ? <span>{sourceCount} sources</span> : null}
+          <span>sources may be incomplete</span>
+          {sources.length > 0 ? (
+            <span className="message-source-links">
+              {sources.map((source) => (
+                <a
+                  key={source.url}
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={source.title ?? source.url}
+                >
+                  {sourceLabel(source)}
+                </a>
+              ))}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {memories.length > 0 ? (
+        <details className="message-memory-footer">
+          <summary>
+            <Database aria-hidden="true" size={13} strokeWidth={1.8} />
+            <span>{memories.length === 1 ? "1 memory" : `${memories.length} memories`}</span>
+          </summary>
+          <div className="message-memory-list">
+            {memories.map((memory) => (
+              <p key={memory.id}>
+                <span>{memory.kind}</span>
+                {memory.content}
+              </p>
+            ))}
+          </div>
+        </details>
       ) : null}
     </footer>
   );
@@ -157,6 +185,21 @@ function uniqueSources(sources: ChatSource[]): ChatSource[] {
     }
     seen.add(url);
     unique.push({ ...source, url });
+  }
+
+  return unique;
+}
+
+function uniqueMemories(memories: ChatMemoryUse[]): ChatMemoryUse[] {
+  const seen = new Set<string>();
+  const unique: ChatMemoryUse[] = [];
+
+  for (const memory of memories) {
+    if (seen.has(memory.id)) {
+      continue;
+    }
+    seen.add(memory.id);
+    unique.push(memory);
   }
 
   return unique;
