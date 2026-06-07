@@ -123,6 +123,23 @@ models:
       --jinja
       --port ${PORT}
 
+  deepseek-r1-8b:
+    name: "DeepSeek R1 0528 8B"
+    description: "DeepSeek R1 0528 Qwen3 8B reasoning model. Stable local DeepSeek default for the RTX 4080."
+    useModelName: "bartowski/deepseek-ai_DeepSeek-R1-0528-Qwen3-8B-GGUF:Q6_K"
+    proxy: "http://127.0.0.1:${PORT}"
+    ttl: 600
+    cmd: |
+      ${llama-server}
+      -hf bartowski/deepseek-ai_DeepSeek-R1-0528-Qwen3-8B-GGUF:Q6_K
+      -ngl 999
+      -c 32768
+      -fa on
+      -ctk q8_0
+      -ctv q8_0
+      --jinja
+      --port ${PORT}
+
 groups:
   local-models:
     swap: true
@@ -133,3 +150,4 @@ groups:
       - gpt-oss
       - qwen-coder-fim
       - gemma-deep
+      - deepseek-r1-8b
