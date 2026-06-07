@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Database, PanelLeftOpen, SendHorizontal } from "lucide-react";
+import { ChevronDown, Database, PanelLeftOpen, SendHorizontal } from "lucide-react";
 import {
   compactModelName,
   providerConnectionTitle
@@ -14,6 +14,8 @@ import { MessageThread } from "./MessageThread";
 
 interface ChatPanelProps {
   conversation: Conversation | null;
+  providers: PublicProvider[];
+  activeProviderId: string;
   activeProvider: PublicProvider | null;
   memoryEnabled: boolean;
   memoryMode: ConversationMemoryMode;
@@ -23,12 +25,15 @@ interface ChatPanelProps {
   loading: "idle" | "loading" | "ready" | "failed";
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
+  onProviderChange: (id: string) => Promise<void>;
   onMemoryModeChange: (mode: ConversationMemoryMode) => Promise<void>;
   onSend: (content: string) => Promise<void>;
 }
 
 export function ChatPanel({
   conversation,
+  providers,
+  activeProviderId,
   activeProvider,
   memoryEnabled,
   memoryMode,
@@ -38,11 +43,13 @@ export function ChatPanel({
   loading,
   sidebarCollapsed,
   onToggleSidebar,
+  onProviderChange,
   onMemoryModeChange,
   onSend
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [followStream, setFollowStream] = useState(true);
+  const [modelSaving, setModelSaving] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const wasBusyRef = useRef(false);
@@ -131,10 +138,23 @@ export function ChatPanel({
     void onSend(prompt);
   }
 
+  async function changeProvider(providerId: string): Promise<void> {
+    if (providerId === activeProviderId || providerId === "" || busy) {
+      return;
+    }
+
+    setModelSaving(true);
+    try {
+      await onProviderChange(providerId);
+    } finally {
+      setModelSaving(false);
+    }
+  }
+
   return (
     <section className="flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden">
       <header className="header-shell border-b border-[var(--line)] px-3 py-3 sm:px-5 sm:py-4">
-        <div className="flex items-center justify-between gap-3 sm:gap-4">
+        <div className="chat-header-main">
           <div className="flex min-w-0 items-center gap-3">
             {sidebarCollapsed ? (
               <button
@@ -147,16 +167,18 @@ export function ChatPanel({
                 <PanelLeftOpen aria-hidden="true" size={17} strokeWidth={2.1} />
               </button>
             ) : null}
-            <div className="min-w-0">
+            <div className="chat-title-block">
               <h2 className="truncate text-base font-semibold">
                 {conversation?.title ?? "New conversation"}
               </h2>
-              <p
-                className="mt-0.5 truncate text-xs text-[var(--muted)]"
-                title={providerConnectionTitle(activeProvider)}
-              >
-                {activeProvider === null ? modelLabel : `${activeProvider.name} · ${modelLabel}`}
-              </p>
+              <ChatModelSelect
+                providers={providers}
+                activeProviderId={activeProviderId}
+                activeProvider={activeProvider}
+                modelLabel={modelLabel}
+                disabled={busy || modelSaving}
+                onChange={changeProvider}
+              />
             </div>
           </div>
           <button
@@ -248,6 +270,53 @@ export function ChatPanel({
         </div>
       </footer>
     </section>
+  );
+}
+
+function ChatModelSelect({
+  providers,
+  activeProviderId,
+  activeProvider,
+  modelLabel,
+  disabled,
+  onChange
+}: {
+  providers: PublicProvider[];
+  activeProviderId: string;
+  activeProvider: PublicProvider | null;
+  modelLabel: string;
+  disabled: boolean;
+  onChange: (id: string) => Promise<void>;
+}) {
+  return (
+    <span
+      className="chat-model-select-shell"
+      title={providerConnectionTitle(activeProvider)}
+    >
+      <select
+        className="chat-model-select"
+        aria-label="Active model"
+        value={activeProviderId}
+        disabled={disabled || providers.length === 0}
+        onChange={(event) => void onChange(event.target.value)}
+      >
+        {providers.length === 0 ? <option value="">No providers</option> : null}
+        {providers.map((provider) => (
+          <option key={provider.id} value={provider.id} disabled={!provider.chatSupported}>
+            {provider.name}
+          </option>
+        ))}
+      </select>
+      <span className="chat-model-select-fallback" aria-hidden="true">
+        {activeProvider === null ? modelLabel : `${activeProvider.name} · ${modelLabel}`}
+      </span>
+      <ChevronDown
+        aria-hidden="true"
+        className="chat-model-select-chevron"
+        size={14}
+        strokeWidth={2.1}
+      />
+    </span>
   );
 }
 

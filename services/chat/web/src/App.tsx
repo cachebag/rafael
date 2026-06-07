@@ -515,6 +515,8 @@ export default function App() {
         </div>
         <ChatPanel
           conversation={conversation}
+          providers={state?.providers ?? []}
+          activeProviderId={state?.activeProviderId ?? ""}
           activeProvider={activeProvider}
           memoryEnabled={state?.memory.settings.enabled ?? false}
           memoryMode={
@@ -529,6 +531,7 @@ export default function App() {
           loading={loading}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={toggleSidebar}
+          onProviderChange={handleProviderChange}
           onMemoryModeChange={handleMemoryModeChange}
           onSend={handleSend}
         />
