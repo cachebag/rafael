@@ -29,6 +29,19 @@ export function GeneralSettings({
 }: GeneralSettingsProps) {
   const mode = themeMode(theme);
   const switchToMode = mode === "dark" ? "light" : "dark";
+  const providerOptions =
+    providers.length === 0
+      ? [{ value: "", label: "No providers" }]
+      : providers.map((provider) => ({
+          value: provider.id,
+          label: provider.name,
+          detail: provider.model,
+          disabled: !provider.chatSupported
+        }));
+  const themeOptions = themes.map((themeOption) => ({
+    value: themeOption.value,
+    label: themeOption.label
+  }));
 
   return (
     <section className="settings-section">
@@ -37,32 +50,23 @@ export function GeneralSettings({
         <Field label="Active model">
           <SelectControl
             value={activeProviderId}
+            options={providerOptions}
+            ariaLabel="Active model"
             disabled={controlsDisabled || providers.length === 0}
-            onChange={(event) => onProviderChange(event.target.value)}
-          >
-            {providers.length === 0 ? <option value="">No providers</option> : null}
-            {providers.map((provider) => (
-              <option key={provider.id} value={provider.id} disabled={!provider.chatSupported}>
-                {provider.name}
-              </option>
-            ))}
-          </SelectControl>
+            onChange={onProviderChange}
+          />
         </Field>
         <Field label="Theme">
           <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
             <SelectControl
               value={themeBase(theme)}
+              options={themeOptions}
+              ariaLabel="Theme"
               disabled={controlsDisabled}
-              onChange={(event) =>
-                onThemeChange(composeTheme(event.target.value as ThemeBaseName, mode))
+              onChange={(value) =>
+                onThemeChange(composeTheme(value as ThemeBaseName, mode))
               }
-            >
-              {themes.map((themeOption) => (
-                <option key={themeOption.value} value={themeOption.value}>
-                  {themeOption.label}
-                </option>
-              ))}
-            </SelectControl>
+            />
             <button
               type="button"
               className="theme-mode-button"

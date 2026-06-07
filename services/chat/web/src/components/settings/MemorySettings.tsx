@@ -23,6 +23,24 @@ interface MemorySettingsProps {
   onMemoryChanged: () => Promise<void>;
 }
 
+const memoryModeOptions = [
+  { value: "normal", label: "Memory" },
+  { value: "no_memory", label: "No memory" }
+];
+
+const memoryFilterOptions = [
+  { value: "active", label: "Active" },
+  { value: "pending", label: "Pending" },
+  { value: "archived", label: "Archived" },
+  { value: "all", label: "All" }
+];
+
+const memoryStatusOptions = [
+  { value: "active", label: "Active" },
+  { value: "pending", label: "Pending" },
+  { value: "archived", label: "Archived" }
+];
+
 export function MemorySettings({
   memory,
   busy,
@@ -182,16 +200,15 @@ export function MemorySettings({
           <Field label="New chats">
             <SelectControl
               value={memoryState.settings.defaultConversationMode}
+              options={memoryModeOptions}
+              ariaLabel="Default memory mode for new chats"
               disabled={controlsDisabled || !memoryState.settings.enabled}
-              onChange={(event) =>
+              onChange={(value) =>
                 void updateMemorySettings({
-                  defaultConversationMode: event.target.value as ConversationMemoryMode
+                  defaultConversationMode: value as ConversationMemoryMode
                 })
               }
-            >
-              <option value="normal">Memory</option>
-              <option value="no_memory">No memory</option>
-            </SelectControl>
+            />
           </Field>
           <Field label="Context budget">
             <input
@@ -233,14 +250,11 @@ export function MemorySettings({
             <Field label="Status">
               <SelectControl
                 value={memoryStatus}
+                options={memoryFilterOptions}
+                ariaLabel="Memory status filter"
                 disabled={controlsDisabled}
-                onChange={(event) => setMemoryStatus(event.target.value as MemoryStatus | "all")}
-              >
-                <option value="active">Active</option>
-                <option value="pending">Pending</option>
-                <option value="archived">Archived</option>
-                <option value="all">All</option>
-              </SelectControl>
+                onChange={(value) => setMemoryStatus(value as MemoryStatus | "all")}
+              />
             </Field>
           </div>
 
@@ -359,13 +373,11 @@ function MemoryRow({
         </div>
         <SelectControl
           value={status}
+          options={memoryStatusOptions}
+          ariaLabel="Memory status"
           disabled={disabled}
-          onChange={(event) => setStatus(event.target.value as MemoryStatus)}
-        >
-          <option value="active">Active</option>
-          <option value="pending">Pending</option>
-          <option value="archived">Archived</option>
-        </SelectControl>
+          onChange={(value) => setStatus(value as MemoryStatus)}
+        />
       </div>
       <div className="memory-row-grid">
         <input

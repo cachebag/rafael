@@ -1,23 +1,30 @@
-import type { ReactNode, SelectHTMLAttributes } from "react";
-import { ChevronDown } from "lucide-react";
+import type { ReactNode } from "react";
+import { CustomSelect, type CustomSelectOption } from "../CustomSelect";
 
 export function SelectControl({
-  children,
+  options,
+  value,
+  disabled,
+  ariaLabel,
   className,
-  ...props
-}: SelectHTMLAttributes<HTMLSelectElement>) {
+  onChange
+}: {
+  options: CustomSelectOption[];
+  value: string;
+  disabled?: boolean;
+  ariaLabel: string;
+  className?: string;
+  onChange: (value: string) => void;
+}) {
   return (
-    <span className={["select-shell", className ?? ""].join(" ")}>
-      <select className="control select-control" {...props}>
-        {children}
-      </select>
-      <ChevronDown
-        aria-hidden="true"
-        className="select-chevron"
-        size={16}
-        strokeWidth={2.1}
-      />
-    </span>
+    <CustomSelect
+      className={className}
+      value={value}
+      options={options}
+      disabled={disabled}
+      ariaLabel={ariaLabel}
+      onChange={onChange}
+    />
   );
 }
 
@@ -59,10 +66,10 @@ export function Field({
   className?: string;
 }) {
   return (
-    <label className={["grid gap-2", className ?? ""].join(" ")}>
+    <div className={["grid gap-2", className ?? ""].join(" ")}>
       <span className="control-label">{label}</span>
       {children}
-    </label>
+    </div>
   );
 }
 

@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Database, PanelLeftOpen, SendHorizontal } from "lucide-react";
-import {
-  compactModelName,
-  providerConnectionTitle
-} from "../display";
+import { Database, PanelLeftOpen, SendHorizontal } from "lucide-react";
+import { compactModelName } from "../display";
 import type {
   Conversation,
   ConversationMemoryMode,
   PublicProvider,
   ToolActivity
 } from "../types";
+import { CustomSelect, type CustomSelectOption } from "./CustomSelect";
 import { MessageThread } from "./MessageThread";
 
 interface ChatPanelProps {
@@ -55,8 +53,6 @@ export function ChatPanel({
   const wasBusyRef = useRef(false);
   const restoreComposerFocusRef = useRef(false);
   const canSend = draft.trim().length > 0 && !busy && activeProvider?.chatSupported === true;
-  const modelLabel =
-    activeProvider === null ? "No model selected" : compactModelName(activeProvider.model);
   const nextMemoryMode = memoryMode === "no_memory" ? "normal" : "no_memory";
   const streamPositionKey = useMemo(() => {
     const lastMessage = conversation?.messages.at(-1);
@@ -174,9 +170,9 @@ export function ChatPanel({
               <ChatModelSelect
                 providers={providers}
                 activeProviderId={activeProviderId}
-                activeProvider={activeProvider}
-                modelLabel={modelLabel}
                 disabled={busy || modelSaving}
+                className="chat-model-select-header"
+                menuClassName="chat-model-select-menu"
                 onChange={changeProvider}
               />
             </div>
@@ -251,11 +247,14 @@ export function ChatPanel({
               }}
             />
             <div className="flex items-center justify-between gap-3 border-t border-[var(--line)] px-2 pt-2">
-              <span className="truncate text-xs text-[var(--muted)]" title={activeProvider?.model}>
-                {activeProvider?.chatSupported === false
-                  ? "Adapter pending."
-                  : modelLabel}
-              </span>
+              <ChatModelSelect
+                providers={providers}
+                activeProviderId={activeProviderId}
+                disabled={busy || modelSaving}
+                className="chat-model-select-composer"
+                menuClassName="chat-model-select-menu custom-select-menu-up"
+                onChange={changeProvider}
+              />
               <button
                 type="button"
                 className="button-primary inline-flex shrink-0 items-center gap-1.5"
@@ -276,47 +275,38 @@ export function ChatPanel({
 function ChatModelSelect({
   providers,
   activeProviderId,
-  activeProvider,
-  modelLabel,
   disabled,
+  className,
+  menuClassName,
   onChange
 }: {
   providers: PublicProvider[];
   activeProviderId: string;
-  activeProvider: PublicProvider | null;
-  modelLabel: string;
   disabled: boolean;
+  className?: string;
+  menuClassName?: string;
   onChange: (id: string) => Promise<void>;
 }) {
+  const options: CustomSelectOption[] =
+    providers.length === 0
+      ? [{ value: "", label: "No providers" }]
+      : providers.map((provider) => ({
+          value: provider.id,
+          label: provider.name,
+          detail: compactModelName(provider.model),
+          disabled: !provider.chatSupported
+        }));
+
   return (
-    <span
-      className="chat-model-select-shell"
-      title={providerConnectionTitle(activeProvider)}
-    >
-      <select
-        className="chat-model-select"
-        aria-label="Active model"
-        value={activeProviderId}
-        disabled={disabled || providers.length === 0}
-        onChange={(event) => void onChange(event.target.value)}
-      >
-        {providers.length === 0 ? <option value="">No providers</option> : null}
-        {providers.map((provider) => (
-          <option key={provider.id} value={provider.id} disabled={!provider.chatSupported}>
-            {provider.name}
-          </option>
-        ))}
-      </select>
-      <span className="chat-model-select-fallback" aria-hidden="true">
-        {activeProvider === null ? modelLabel : `${activeProvider.name} · ${modelLabel}`}
-      </span>
-      <ChevronDown
-        aria-hidden="true"
-        className="chat-model-select-chevron"
-        size={14}
-        strokeWidth={2.1}
-      />
-    </span>
+    <CustomSelect
+      className={["chat-model-select", className ?? ""].join(" ")}
+      value={activeProviderId}
+      options={options}
+      disabled={disabled || providers.length === 0}
+      ariaLabel="Active model"
+      menuClassName={menuClassName}
+      onChange={(providerId) => void onChange(providerId)}
+    />
   );
 }
 
