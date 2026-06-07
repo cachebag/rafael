@@ -4,10 +4,14 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use aes_gcm::{
+    Aes256Gcm, Nonce,
+    aead::{Aead, AeadCore, KeyInit, OsRng},
+};
 use anyhow::{Context, bail};
 use chrono::Utc;
 use common::SafeComponent;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::AsyncWriteExt;
 
 use crate::types::{
@@ -19,6 +23,7 @@ pub struct ChatStore {
     data_dir: PathBuf,
     config_path: PathBuf,
     conversations_dir: PathBuf,
+    conversation_obfuscation_key: Option<[u8; 32]>,
 }
 
 impl ChatStore {
@@ -28,7 +33,13 @@ impl ChatStore {
             config_path: data_dir.join("config.json"),
             conversations_dir: data_dir.join("conversations"),
             data_dir,
+            conversation_obfuscation_key: None,
         }
+    }
+
+    pub fn with_conversation_obfuscation_key(mut self, key: [u8; 32]) -> Self {
+        self.conversation_obfuscation_key = Some(key);
+        self
     }
 
     pub async fn load_or_initialize_config(
@@ -94,7 +105,11 @@ impl ChatStore {
                 continue;
             }
 
-            let conversation = read_json::<Conversation>(&path).await?;
+            let read = self.read_conversation_file(&path).await?;
+            if read.migrate_to_obfuscated {
+                self.save_conversation(&read.conversation).await?;
+            }
+            let conversation = read.conversation;
             summaries.push(ConversationSummary::from_conversation(&conversation));
         }
 
@@ -125,8 +140,13 @@ impl ChatStore {
 
     pub async fn get_conversation(&self, id: &str) -> anyhow::Result<Option<Conversation>> {
         let path = self.conversation_path(id)?;
-        match read_json::<Conversation>(&path).await {
-            Ok(conversation) => Ok(Some(conversation)),
+        match self.read_conversation_file(&path).await {
+            Ok(read) => {
+                if read.migrate_to_obfuscated {
+                    self.save_conversation(&read.conversation).await?;
+                }
+                Ok(Some(read.conversation))
+            }
             Err(err) if is_not_found(&err) => Ok(None),
             Err(err) => Err(err),
         }
@@ -135,7 +155,10 @@ impl ChatStore {
     pub async fn save_conversation(&self, conversation: &Conversation) -> anyhow::Result<()> {
         self.ensure_dirs().await?;
         let path = self.conversation_path(&conversation.id)?;
-        write_json(&path, conversation).await
+        match self.conversation_obfuscation_key {
+            Some(key) => write_obfuscated_conversation(&path, conversation, &key).await,
+            None => write_json(&path, conversation).await,
+        }
     }
 
     pub async fn delete_conversation(&self, id: &str) -> anyhow::Result<bool> {
@@ -221,6 +244,103 @@ impl ChatStore {
         reject_symlink(&self.data_dir).await?;
         reject_symlink(&self.conversations_dir).await
     }
+
+    async fn read_conversation_file(&self, path: &Path) -> anyhow::Result<ReadConversation> {
+        reject_symlink(path).await?;
+        let bytes = tokio::fs::read(path)
+            .await
+            .with_context(|| format!("failed to read conversation file {}", path.display()))?;
+
+        if let Some(key) = self.conversation_obfuscation_key {
+            if let Some(envelope) = parse_obfuscated_envelope(&bytes)? {
+                return Ok(ReadConversation {
+                    conversation: decrypt_conversation(&envelope, &key).with_context(|| {
+                        format!("failed to decrypt conversation {}", path.display())
+                    })?,
+                    migrate_to_obfuscated: false,
+                });
+            }
+
+            let conversation = serde_json::from_slice(&bytes)
+                .with_context(|| format!("failed to parse conversation file {}", path.display()))?;
+            return Ok(ReadConversation {
+                conversation,
+                migrate_to_obfuscated: true,
+            });
+        }
+
+        Ok(ReadConversation {
+            conversation: serde_json::from_slice(&bytes)
+                .with_context(|| format!("failed to parse conversation file {}", path.display()))?,
+            migrate_to_obfuscated: false,
+        })
+    }
+}
+
+struct ReadConversation {
+    conversation: Conversation,
+    migrate_to_obfuscated: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ObfuscatedConversationFile {
+    format: String,
+    nonce: String,
+    ciphertext: String,
+}
+
+const OBFUSCATED_CONVERSATION_FORMAT: &str = "rafael-chat-conversation-v1";
+
+async fn write_obfuscated_conversation(
+    path: &Path,
+    conversation: &Conversation,
+    key: &[u8; 32],
+) -> anyhow::Result<()> {
+    reject_symlink(path).await?;
+    let plaintext = serde_json::to_vec(conversation)
+        .with_context(|| format!("failed to serialize conversation {}", conversation.id))?;
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|error| anyhow::anyhow!("invalid conversation obfuscation key: {error}"))?;
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let ciphertext = cipher
+        .encrypt(&nonce, plaintext.as_ref())
+        .map_err(|error| anyhow::anyhow!("failed to encrypt conversation: {error}"))?;
+    let envelope = ObfuscatedConversationFile {
+        format: OBFUSCATED_CONVERSATION_FORMAT.to_owned(),
+        nonce: hex_encode(&nonce),
+        ciphertext: hex_encode(&ciphertext),
+    };
+    write_json(path, &envelope).await
+}
+
+fn parse_obfuscated_envelope(bytes: &[u8]) -> anyhow::Result<Option<ObfuscatedConversationFile>> {
+    let Ok(envelope) = serde_json::from_slice::<ObfuscatedConversationFile>(bytes) else {
+        return Ok(None);
+    };
+    if envelope.format == OBFUSCATED_CONVERSATION_FORMAT {
+        Ok(Some(envelope))
+    } else {
+        Ok(None)
+    }
+}
+
+fn decrypt_conversation(
+    envelope: &ObfuscatedConversationFile,
+    key: &[u8; 32],
+) -> anyhow::Result<Conversation> {
+    let nonce: [u8; 12] = hex_decode(&envelope.nonce)
+        .context("invalid conversation nonce")?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("invalid conversation nonce length"))?;
+    let ciphertext = hex_decode(&envelope.ciphertext).context("invalid conversation ciphertext")?;
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|error| anyhow::anyhow!("invalid conversation obfuscation key: {error}"))?;
+    let nonce = Nonce::from(nonce);
+    let plaintext = cipher
+        .decrypt(&nonce, ciphertext.as_ref())
+        .map_err(|error| anyhow::anyhow!("failed to decrypt conversation: {error}"))?;
+    serde_json::from_slice(&plaintext).context("failed to parse decrypted conversation")
 }
 
 pub fn clean_optional(value: Option<String>) -> Option<String> {
@@ -325,12 +445,46 @@ fn is_not_found(err: &anyhow::Error) -> bool {
     })
 }
 
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
+}
+
+fn hex_decode(value: &str) -> anyhow::Result<Vec<u8>> {
+    let value = value.trim();
+    if value.len() % 2 != 0 {
+        bail!("hex value has odd length");
+    }
+
+    let mut bytes = Vec::with_capacity(value.len() / 2);
+    for chunk in value.as_bytes().chunks_exact(2) {
+        let high = hex_value(chunk[0])?;
+        let low = hex_value(chunk[1])?;
+        bytes.push((high << 4) | low);
+    }
+    Ok(bytes)
+}
+
+fn hex_value(byte: u8) -> anyhow::Result<u8> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        b'A'..=b'F' => Ok(byte - b'A' + 10),
+        _ => bail!("invalid hex digit"),
+    }
+}
+
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ProviderKind;
+    use crate::types::{ChatMessageRecord, ChatRole, ProviderKind};
 
     #[test]
     fn repair_config_preserves_runtime_model_active_provider() {
@@ -355,5 +509,91 @@ mod tests {
 
         assert!(!changed);
         assert_eq!(repaired.settings.active_provider_id, "qwen3-coder");
+    }
+
+    #[tokio::test]
+    async fn obfuscated_store_hides_conversation_content_on_disk() {
+        let data_dir = unique_test_dir("obfuscated-save");
+        let store = ChatStore::new(&data_dir).with_conversation_obfuscation_key([7; 32]);
+        let mut conversation = store
+            .create_conversation(Some("Private title".to_owned()))
+            .await
+            .expect("create conversation");
+        conversation.messages.push(ChatMessageRecord {
+            id: "msg-1".to_owned(),
+            role: ChatRole::User,
+            content: "private family chat".to_owned(),
+            created_at: Utc::now(),
+            provider_id: None,
+            metadata: None,
+        });
+        store
+            .save_conversation(&conversation)
+            .await
+            .expect("save conversation");
+
+        let path = data_dir
+            .join("conversations")
+            .join(format!("{}.json", conversation.id));
+        let raw = tokio::fs::read_to_string(&path)
+            .await
+            .expect("read raw conversation file");
+        assert!(raw.contains(OBFUSCATED_CONVERSATION_FORMAT));
+        assert!(!raw.contains("private family chat"));
+        assert!(!raw.contains("Private title"));
+
+        let loaded = store
+            .get_conversation(&conversation.id)
+            .await
+            .expect("load conversation")
+            .expect("conversation exists");
+        assert_eq!(loaded.title, "Private title");
+        assert_eq!(loaded.messages[0].content, "private family chat");
+
+        let _ = tokio::fs::remove_dir_all(data_dir).await;
+    }
+
+    #[tokio::test]
+    async fn obfuscated_store_migrates_legacy_plaintext_conversation() {
+        let data_dir = unique_test_dir("obfuscated-migrate");
+        let plain_store = ChatStore::new(&data_dir);
+        let conversation = plain_store
+            .create_conversation(Some("Legacy private title".to_owned()))
+            .await
+            .expect("create plaintext conversation");
+        let path = data_dir
+            .join("conversations")
+            .join(format!("{}.json", conversation.id));
+        let raw_before = tokio::fs::read_to_string(&path)
+            .await
+            .expect("read plaintext conversation");
+        assert!(raw_before.contains("Legacy private title"));
+
+        let protected_store = ChatStore::new(&data_dir).with_conversation_obfuscation_key([11; 32]);
+        let loaded = protected_store
+            .get_conversation(&conversation.id)
+            .await
+            .expect("load legacy conversation")
+            .expect("conversation exists");
+        assert_eq!(loaded.title, "Legacy private title");
+
+        let raw_after = tokio::fs::read_to_string(&path)
+            .await
+            .expect("read migrated conversation");
+        assert!(raw_after.contains(OBFUSCATED_CONVERSATION_FORMAT));
+        assert!(!raw_after.contains("Legacy private title"));
+
+        let _ = tokio::fs::remove_dir_all(data_dir).await;
+    }
+
+    fn unique_test_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "rafael-chat-store-{name}-{}-{nanos}",
+            std::process::id()
+        ))
     }
 }

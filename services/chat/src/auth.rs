@@ -15,6 +15,7 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use memory::sqlite::SqliteMemoryStore;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
 use crate::store::ChatStore;
@@ -124,7 +125,15 @@ impl AuthStore {
     }
 
     pub fn user_chat_store(&self, user: &PublicUser) -> ChatStore {
-        ChatStore::new(self.data_dir.join("users").join(&user.id).join("chat"))
+        let store = ChatStore::new(self.data_dir.join("users").join(&user.id).join("chat"));
+        if should_obfuscate_chats(user) {
+            store.with_conversation_obfuscation_key(derive_conversation_obfuscation_key(
+                self.token_secret.as_ref(),
+                user,
+            ))
+        } else {
+            store
+        }
     }
 
     pub async fn user_memory_store(&self, user: &PublicUser) -> anyhow::Result<SqliteMemoryStore> {
@@ -266,6 +275,23 @@ fn user_display_first_name(user: &StoredUser) -> String {
     } else {
         first_name.to_owned()
     }
+}
+
+fn should_obfuscate_chats(user: &PublicUser) -> bool {
+    let username = normalize_username(&user.username);
+    let first_name = normalize_first_name(&user.first_name);
+    let id = normalize_username(&user.id);
+    !(username == "cachebag" || id == "cachebag" || first_name == "akrm")
+}
+
+fn derive_conversation_obfuscation_key(secret: &str, user: &PublicUser) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"rafael-chat-conversation-obfuscation-v1");
+    hasher.update([0]);
+    hasher.update(secret.as_bytes());
+    hasher.update([0]);
+    hasher.update(user.id.as_bytes());
+    hasher.finalize().into()
 }
 
 fn unique_user_id(username: &str, users: &[StoredUser]) -> String {
