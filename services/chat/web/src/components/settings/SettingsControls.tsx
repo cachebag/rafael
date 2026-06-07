@@ -35,12 +35,16 @@ export function ToggleField({
   return (
     <label className="settings-toggle-row">
       <input
+        className="settings-toggle-input"
         type="checkbox"
         checked={checked}
         disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
       />
-      <span>{label}</span>
+      <span className="settings-toggle-copy">{label}</span>
+      <span className="settings-toggle-switch" aria-hidden="true">
+        <span className="settings-toggle-thumb" />
+      </span>
     </label>
   );
 }

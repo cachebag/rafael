@@ -150,13 +150,13 @@ export function MemorySettings({
   return (
     <>
       <section className="settings-section">
-        <div className="flex items-center justify-between gap-3">
+        <div className="settings-section-bar">
           <h3 className="settings-section-title">Memory</h3>
           <span className="settings-memory-count">
             {memoryState.counts.active} active · {memoryState.counts.pending} pending
           </span>
         </div>
-        <div className="settings-grid settings-grid-two">
+        <div className="memory-toggle-grid">
           <ToggleField
             label="Enabled"
             checked={memoryState.settings.enabled}
@@ -177,6 +177,8 @@ export function MemorySettings({
               void updateMemorySettings({ requireApproval: checked })
             }
           />
+        </div>
+        <div className="memory-policy-fields">
           <Field label="New chats">
             <SelectControl
               value={memoryState.settings.defaultConversationMode}
@@ -211,78 +213,99 @@ export function MemorySettings({
       </section>
 
       <section className="settings-section">
-        <h3 className="settings-section-title">Manage memories</h3>
+        <div className="settings-section-bar">
+          <h3 className="settings-section-title">Manage memories</h3>
+          <span className="settings-memory-count">
+            {memories.length} shown
+          </span>
+        </div>
         <div className="memory-manager">
           <div className="memory-toolbar">
-            <input
-              className="control"
-              value={memoryQuery}
-              placeholder="Search memories"
-              disabled={controlsDisabled}
-              onChange={(event) => setMemoryQuery(event.target.value)}
-            />
-            <SelectControl
-              value={memoryStatus}
-              disabled={controlsDisabled}
-              onChange={(event) => setMemoryStatus(event.target.value as MemoryStatus | "all")}
-            >
-              <option value="active">Active</option>
-              <option value="pending">Pending</option>
-              <option value="archived">Archived</option>
-              <option value="all">All</option>
-            </SelectControl>
+            <Field label="Search">
+              <input
+                className="control"
+                value={memoryQuery}
+                placeholder="Search memories"
+                disabled={controlsDisabled}
+                onChange={(event) => setMemoryQuery(event.target.value)}
+              />
+            </Field>
+            <Field label="Status">
+              <SelectControl
+                value={memoryStatus}
+                disabled={controlsDisabled}
+                onChange={(event) => setMemoryStatus(event.target.value as MemoryStatus | "all")}
+              >
+                <option value="active">Active</option>
+                <option value="pending">Pending</option>
+                <option value="archived">Archived</option>
+                <option value="all">All</option>
+              </SelectControl>
+            </Field>
           </div>
 
-          <div className="memory-create-row">
-            <input
-              className="control"
-              value={newMemoryKind}
-              disabled={controlsDisabled}
-              onChange={(event) => setNewMemoryKind(event.target.value)}
-            />
-            <input
-              className="control"
-              value={newMemoryTags}
-              placeholder="tags"
-              disabled={controlsDisabled}
-              onChange={(event) => setNewMemoryTags(event.target.value)}
-            />
-            <textarea
-              className="control memory-content-input"
-              value={newMemoryContent}
-              placeholder="New memory"
-              rows={2}
-              disabled={controlsDisabled}
-              onChange={(event) => setNewMemoryContent(event.target.value)}
-            />
-            <button
-              type="button"
-              className="button-secondary memory-add-button"
-              disabled={controlsDisabled || newMemoryContent.trim() === ""}
-              onClick={() => void addMemory()}
-            >
-              <Plus aria-hidden="true" size={15} strokeWidth={2.1} />
-              Add
-            </button>
-          </div>
-
-          <div className="memory-list">
-            {memoryLoading ? (
-              <p className="settings-account-copy">loading</p>
-            ) : memories.length === 0 ? (
-              <p className="settings-account-copy">No memories.</p>
-            ) : (
-              memories.map((memoryRecord) => (
-                <MemoryRow
-                  key={memoryRecord.id}
-                  memory={memoryRecord}
+          <section className="memory-subsection">
+            <h4 className="memory-subsection-title">Add memory</h4>
+            <div className="memory-create-row">
+              <Field label="Kind">
+                <input
+                  className="control"
+                  value={newMemoryKind}
                   disabled={controlsDisabled}
-                  onSave={saveMemory}
-                  onDelete={removeMemory}
+                  onChange={(event) => setNewMemoryKind(event.target.value)}
                 />
-              ))
-            )}
-          </div>
+              </Field>
+              <Field label="Tags">
+                <input
+                  className="control"
+                  value={newMemoryTags}
+                  placeholder="tags"
+                  disabled={controlsDisabled}
+                  onChange={(event) => setNewMemoryTags(event.target.value)}
+                />
+              </Field>
+              <Field label="Memory" className="memory-content-field">
+                <textarea
+                  className="control memory-content-input"
+                  value={newMemoryContent}
+                  placeholder="New memory"
+                  rows={2}
+                  disabled={controlsDisabled}
+                  onChange={(event) => setNewMemoryContent(event.target.value)}
+                />
+              </Field>
+              <button
+                type="button"
+                className="button-secondary memory-add-button"
+                disabled={controlsDisabled || newMemoryContent.trim() === ""}
+                onClick={() => void addMemory()}
+              >
+                <Plus aria-hidden="true" size={15} strokeWidth={2.1} />
+                Add
+              </button>
+            </div>
+          </section>
+
+          <section className="memory-subsection">
+            <h4 className="memory-subsection-title">Saved memories</h4>
+            <div className="memory-list">
+              {memoryLoading ? (
+                <p className="settings-account-copy">loading</p>
+              ) : memories.length === 0 ? (
+                <p className="settings-account-copy">No memories.</p>
+              ) : (
+                memories.map((memoryRecord) => (
+                  <MemoryRow
+                    key={memoryRecord.id}
+                    memory={memoryRecord}
+                    disabled={controlsDisabled}
+                    onSave={saveMemory}
+                    onDelete={removeMemory}
+                  />
+                ))
+              )}
+            </div>
+          </section>
         </div>
       </section>
 
