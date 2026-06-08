@@ -572,7 +572,11 @@ input:disabled {
 }
 
 .chat-model-select .custom-select-button {
+  width: fit-content;
+  max-width: 100%;
   min-height: 1.5rem;
+  grid-template-columns: minmax(0, auto) auto;
+  gap: 0.35rem;
   border-color: transparent;
   background: transparent;
   color: var(--muted);
