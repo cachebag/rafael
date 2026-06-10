@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Target, Pencil, Check, X, Trash2, Plus } from "lucide-react";
 import { Card } from "./ui/Card";
 import { Input } from "./ui/Input";
@@ -18,20 +18,21 @@ export function CustomSavingsGoals() {
   const [editingGoalId, setEditingGoalId] = useState<number | null>(null);
   const [editCurrentAmount, setEditCurrentAmount] = useState("");
 
-  const loadGoals = useCallback(async () => {
-    try {
-      const data = await api.savingsGoals.list();
-      setGoals(data);
-    } catch (e) {
-      console.error("Failed to load savings goals:", e);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+
 
   useEffect(() => {
-    loadGoals();
-  }, [loadGoals]);
+    api.savingsGoals
+      .list()
+      .then((data) => {
+        setGoals(data);
+      })
+      .catch((e) => {
+        console.error("Failed to load savings goals:", e);
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  }, []);
 
   const addNewGoal = async () => {
     const target = parseFloat(newGoalTarget);
