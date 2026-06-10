@@ -17,6 +17,8 @@
 
 rafael is both my workstation and the name for this monorepo with all the various services, crates and configuration files that power my homelab.
 
+there is no formal way to set this up. i've done my best to document everything and make it easy to work with, but that is in the context of ME working on it, not others. also, basically ALL of this aside from a few things here and there are "vibe-coded". so take this as your warning before using anything here. 
+
 [tailscale](https://tailscale.com/) is used as a mesh VPN between my devices.
 
 ## Layout
