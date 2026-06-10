@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Trash2, Edit2, Check, X } from "lucide-react";
 import { Card } from "./ui/Card";
 import { Input } from "./ui/Input";
@@ -18,21 +18,20 @@ export function RetirementBreakdownCard() {
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
 
-  const loadItems = useCallback(async () => {
-    try {
-      const data = await api.retirementBreakdown.list();
-      setBreakdownItems(data);
-      window.dispatchEvent(new CustomEvent("retirementBreakdownUpdated", { detail: data }));
-    } catch (e) {
-      console.error("Failed to load retirement breakdown:", e);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    loadItems();
-  }, [loadItems]);
+    api.retirementBreakdown
+      .list()
+      .then((data) => {
+        setBreakdownItems(data);
+        window.dispatchEvent(new CustomEvent("retirementBreakdownUpdated", { detail: data }));
+      })
+      .catch((e) => {
+        console.error("Failed to load retirement breakdown:", e);
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  }, []);
 
   const handleAdd = async () => {
     if (!label || !amount) return;
