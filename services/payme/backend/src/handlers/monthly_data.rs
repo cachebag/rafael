@@ -28,6 +28,11 @@ pub struct UpdateMonthlyFixedExpense {
     pub amount: Option<f64>,
 }
 
+#[derive(Deserialize, ToSchema)]
+pub struct ReorderMonthlyFixedExpenses {
+    pub ids: Vec<i64>,
+}
+
 #[utoipa::path(
     post,
     path = "/api/months/{month_id}/fixed-expenses",
@@ -57,12 +62,20 @@ pub async fn create_monthly_fixed_expense(
         .await?
         .ok_or(PaymeError::NotFound)?;
 
+    let sort_order: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM monthly_fixed_expenses WHERE month_id = ?",
+    )
+    .bind(month_id)
+    .fetch_one(&pool)
+    .await?;
+
     let id: i64 = sqlx::query_scalar(
-        "INSERT INTO monthly_fixed_expenses (month_id, label, amount) VALUES (?, ?, ?) RETURNING id",
+        "INSERT INTO monthly_fixed_expenses (month_id, label, amount, sort_order) VALUES (?, ?, ?, ?) RETURNING id",
     )
     .bind(month_id)
     .bind(&payload.label)
     .bind(payload.amount)
+    .bind(sort_order)
     .fetch_one(&pool)
     .await?;
 
@@ -166,6 +179,33 @@ pub async fn delete_monthly_fixed_expense(
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub async fn reorder_monthly_fixed_expenses(
+    State(pool): State<SqlitePool>,
+    axum::Extension(claims): axum::Extension<Claims>,
+    Path(month_id): Path<i64>,
+    Json(payload): Json<ReorderMonthlyFixedExpenses>,
+) -> Result<StatusCode, PaymeError> {
+    let _: (i64,) = sqlx::query_as("SELECT id FROM months WHERE id = ? AND user_id = ?")
+        .bind(month_id)
+        .bind(claims.sub)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or(PaymeError::NotFound)?;
+
+    for (index, id) in payload.ids.iter().enumerate() {
+        sqlx::query(
+            "UPDATE monthly_fixed_expenses SET sort_order = ? WHERE id = ? AND month_id = ?",
+        )
+        .bind(index as i64)
+        .bind(id)
+        .bind(month_id)
+        .execute(&pool)
+        .await?;
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Deserialize, ToSchema, Validate)]
 pub struct UpdateMonthlySavings {
     #[validate(range(min = 0.0))]
@@ -211,7 +251,6 @@ pub async fn get_monthly_savings(
     match existing {
         Some(savings) => Ok(Json(savings)),
         None => {
-            // If no monthly savings exist yet, create one with defaults from user
             let (savings, retirement_savings, savings_goal): (f64, f64, f64) = sqlx::query_as(
                 "SELECT savings, retirement_savings, savings_goal FROM users WHERE id = ?",
             )

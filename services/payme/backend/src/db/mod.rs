@@ -51,12 +51,23 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             user_id INTEGER NOT NULL,
             label TEXT NOT NULL,
             amount REAL NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
         "#,
     )
     .execute(pool)
     .await?;
+
+    sqlx::query("ALTER TABLE fixed_expenses ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await
+        .ok();
+
+    sqlx::query("UPDATE fixed_expenses SET sort_order = id WHERE sort_order = 0 AND NOT EXISTS (SELECT 1 FROM fixed_expenses WHERE sort_order <> 0)")
+        .execute(pool)
+        .await
+        .ok();
 
     sqlx::query(
         r#"
@@ -66,6 +77,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             label TEXT NOT NULL,
             default_amount REAL NOT NULL,
             color TEXT NOT NULL DEFAULT '#71717a',
+            sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
         "#,
@@ -78,6 +90,16 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await;
+
+    sqlx::query("ALTER TABLE budget_categories ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await
+        .ok();
+
+    sqlx::query("UPDATE budget_categories SET sort_order = id WHERE sort_order = 0 AND NOT EXISTS (SELECT 1 FROM budget_categories WHERE sort_order <> 0)")
+        .execute(pool)
+        .await
+        .ok();
 
     sqlx::query(
         r#"
@@ -103,12 +125,29 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             month_id INTEGER NOT NULL,
             label TEXT NOT NULL,
             amount REAL NOT NULL,
+            paid_on TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
         )
         "#,
     )
     .execute(pool)
     .await?;
+
+    sqlx::query("ALTER TABLE income_entries ADD COLUMN paid_on TEXT")
+        .execute(pool)
+        .await
+        .ok();
+
+    sqlx::query("ALTER TABLE income_entries ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await
+        .ok();
+
+    sqlx::query("UPDATE income_entries SET sort_order = id WHERE sort_order = 0 AND NOT EXISTS (SELECT 1 FROM income_entries WHERE sort_order <> 0)")
+        .execute(pool)
+        .await
+        .ok();
 
     sqlx::query(
         r#"
@@ -136,6 +175,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             amount REAL NOT NULL,
             spent_on TEXT NOT NULL,
             savings_destination TEXT NOT NULL DEFAULT 'none',
+            sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE,
             FOREIGN KEY (category_id) REFERENCES budget_categories(id) ON DELETE CASCADE
         )
@@ -150,9 +190,19 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await;
 
+    sqlx::query("ALTER TABLE items ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await
+        .ok();
+
     sqlx::query("UPDATE items SET savings_destination = 'none' WHERE savings_destination = '' OR savings_destination IS NULL")
         .execute(pool)
         .await?;
+
+    sqlx::query("UPDATE items SET sort_order = id WHERE sort_order = 0 AND NOT EXISTS (SELECT 1 FROM items WHERE sort_order <> 0)")
+        .execute(pool)
+        .await
+        .ok();
 
     sqlx::query(
         r#"
@@ -175,12 +225,25 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             month_id INTEGER NOT NULL,
             label TEXT NOT NULL,
             amount REAL NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
         )
         "#,
     )
     .execute(pool)
     .await?;
+
+    sqlx::query(
+        "ALTER TABLE monthly_fixed_expenses ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(pool)
+    .await
+    .ok();
+
+    sqlx::query("UPDATE monthly_fixed_expenses SET sort_order = id WHERE sort_order = 0 AND NOT EXISTS (SELECT 1 FROM monthly_fixed_expenses WHERE sort_order <> 0)")
+        .execute(pool)
+        .await
+        .ok();
 
     sqlx::query(
         r#"
@@ -205,6 +268,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             name TEXT NOT NULL,
             current_amount REAL NOT NULL DEFAULT 0,
             target_amount REAL NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
         "#,
@@ -213,12 +277,25 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     sqlx::query(
+        "ALTER TABLE custom_savings_goals ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(pool)
+    .await
+    .ok();
+
+    sqlx::query("UPDATE custom_savings_goals SET sort_order = id WHERE sort_order = 0 AND NOT EXISTS (SELECT 1 FROM custom_savings_goals WHERE sort_order <> 0)")
+        .execute(pool)
+        .await
+        .ok();
+
+    sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS retirement_breakdown_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             label TEXT NOT NULL,
             amount REAL NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
         "#,
@@ -226,8 +303,18 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    // Migration: Backfill existing months with current fixed expenses and savings
-    // This ensures existing data is preserved when upgrading
+    sqlx::query(
+        "ALTER TABLE retirement_breakdown_items ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(pool)
+    .await
+    .ok();
+
+    sqlx::query("UPDATE retirement_breakdown_items SET sort_order = id WHERE sort_order = 0 AND NOT EXISTS (SELECT 1 FROM retirement_breakdown_items WHERE sort_order <> 0)")
+        .execute(pool)
+        .await
+        .ok();
+
     let existing_months: Vec<(i64, i64)> = sqlx::query_as(
         "SELECT id, user_id FROM months WHERE id NOT IN (SELECT DISTINCT month_id FROM monthly_fixed_expenses)",
     )
@@ -236,27 +323,26 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .unwrap_or_default();
 
     for (month_id, user_id) in existing_months {
-        // Copy current fixed expenses to this month
-        let fixed_expenses: Vec<(String, f64)> =
-            sqlx::query_as("SELECT label, amount FROM fixed_expenses WHERE user_id = ?")
+        let fixed_expenses: Vec<(String, f64, i64)> =
+            sqlx::query_as("SELECT label, amount, sort_order FROM fixed_expenses WHERE user_id = ? ORDER BY sort_order, id")
                 .bind(user_id)
                 .fetch_all(pool)
                 .await
                 .unwrap_or_default();
 
-        for (label, amount) in fixed_expenses {
+        for (label, amount, sort_order) in fixed_expenses {
             sqlx::query(
-                "INSERT INTO monthly_fixed_expenses (month_id, label, amount) VALUES (?, ?, ?)",
+                "INSERT INTO monthly_fixed_expenses (month_id, label, amount, sort_order) VALUES (?, ?, ?, ?)",
             )
             .bind(month_id)
             .bind(&label)
             .bind(amount)
+            .bind(sort_order)
             .execute(pool)
             .await
             .ok();
         }
 
-        // Copy current savings values to this month
         let user_savings: Option<(f64, f64, f64)> = sqlx::query_as(
             "SELECT savings, retirement_savings, savings_goal FROM users WHERE id = ?",
         )

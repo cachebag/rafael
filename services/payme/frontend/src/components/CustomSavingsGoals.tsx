@@ -4,6 +4,7 @@ import { Card } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { ProgressBar } from "./ui/ProgressBar";
 import { Button } from "./ui/Button";
+import { ReorderControls } from "./ui/ReorderControls";
 import { useCurrency } from "../context/CurrencyContext";
 import { api, CustomSavingsGoal } from "../api/client";
 
@@ -88,6 +89,20 @@ export function CustomSavingsGoals() {
     }
   };
 
+  const moveGoal = async (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= goals.length) return;
+    const next = [...goals];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+
+    try {
+      await api.savingsGoals.reorder(next.map((goal) => goal.id));
+      setGoals(next);
+    } catch (e) {
+      console.error("Failed to reorder savings goals:", e);
+    }
+  };
+
   const cancelAddNew = () => {
     setIsAddingNew(false);
     setNewGoalName("");
@@ -127,7 +142,7 @@ export function CustomSavingsGoals() {
           </p>
         )}
 
-        {goals.map((goal) => {
+        {goals.map((goal, index) => {
           const percentage =
             goal.target_amount > 0
               ? (goal.current_amount / goal.target_amount) * 100
@@ -140,7 +155,10 @@ export function CustomSavingsGoals() {
               key={goal.id}
               className="border border-sand-300 dark:border-charcoal-700 rounded-lg p-3 space-y-2"
             >
-              <div className="flex items-start justify-between">
+              <div className="flex items-start justify-between gap-2">
+                {goals.length > 1 && (
+                  <ReorderControls index={index} total={goals.length} onMove={moveGoal} />
+                )}
                 <div className="flex-1">
                   <h4 className="text-sm font-semibold text-charcoal-700 dark:text-sand-200 mb-1">
                     {goal.name}

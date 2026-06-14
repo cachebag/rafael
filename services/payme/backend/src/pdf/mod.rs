@@ -226,6 +226,7 @@ mod tests {
                 month_id: 1,
                 label: "Salary".to_string(),
                 amount: 5000.0,
+                paid_on: None,
             }],
             fixed_expenses: vec![MonthlyFixedExpense {
                 id: 1,
@@ -276,10 +277,8 @@ mod tests {
         assert!(result.is_ok());
         let pdf_data = result.unwrap();
 
-        // PDF should have content
         assert!(!pdf_data.is_empty());
 
-        // PDF should start with %PDF header
         assert!(pdf_data.starts_with(b"%PDF"));
     }
 
@@ -322,7 +321,7 @@ mod tests {
     #[test]
     fn test_generate_pdf_over_budget() {
         let mut summary = create_test_summary();
-        summary.budgets[0].spent_amount = 600.0; // Over the 500 allocated
+        summary.budgets[0].spent_amount = 600.0;
 
         let result = generate_pdf(&summary);
         assert!(result.is_ok());

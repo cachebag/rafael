@@ -530,6 +530,7 @@ async fn income_create_and_list() {
         Json(CreateIncome {
             label: "Salary".to_string(),
             amount: 5000.0,
+            paid_on: None,
         }),
     )
     .await
@@ -542,6 +543,7 @@ async fn income_create_and_list() {
         Json(CreateIncome {
             label: "Freelance".to_string(),
             amount: 800.0,
+            paid_on: None,
         }),
     )
     .await

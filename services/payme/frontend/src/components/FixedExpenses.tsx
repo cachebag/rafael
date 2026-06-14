@@ -5,6 +5,7 @@ import { Card } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { Modal } from "./ui/Modal";
+import { ReorderControls } from "./ui/ReorderControls";
 import { useCurrency } from "../context/CurrencyContext";
 
 interface FixedExpensesProps {
@@ -45,6 +46,15 @@ export function FixedExpenses({ monthId, expenses, isReadOnly, onUpdate }: Fixed
     await onUpdate();
   };
 
+  const handleMove = async (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= expenses.length) return;
+    const next = [...expenses];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    await api.monthlyFixedExpenses.reorder(monthId, next.map((expense) => expense.id));
+    await onUpdate();
+  };
+
   const startEdit = (expense: MonthlyFixedExpense) => {
     if (isReadOnly) return;
     setEditingId(expense.id);
@@ -79,14 +89,19 @@ export function FixedExpenses({ monthId, expenses, isReadOnly, onUpdate }: Fixed
         </div>
 
         <div className="space-y-2">
-          {expenses.map((expense) => (
+          {expenses.map((expense, index) => (
             <div
               key={expense.id}
               className="flex items-center justify-between py-2 border-b border-sand-200 dark:border-charcoal-800"
             >
-              <span className="text-sm text-charcoal-700 dark:text-sand-300">
-                {expense.label}
-              </span>
+              <div className="flex min-w-0 items-center gap-2">
+                {!isReadOnly && expenses.length > 1 && (
+                  <ReorderControls index={index} total={expenses.length} onMove={handleMove} />
+                )}
+                <span className="truncate text-sm text-charcoal-700 dark:text-sand-300">
+                  {expense.label}
+                </span>
+              </div>
               <span className="text-sm text-charcoal-600 dark:text-charcoal-400">
                 {formatCurrency(expense.amount)}
               </span>
@@ -113,7 +128,7 @@ export function FixedExpenses({ monthId, expenses, isReadOnly, onUpdate }: Fixed
 
       <Modal isOpen={isManaging} onClose={() => setIsManaging(false)} title="Manage Fixed Expenses">
         <div className="space-y-3">
-          {expenses.map((expense) => (
+          {expenses.map((expense, index) => (
             <div key={expense.id}>
               {editingId === expense.id ? (
                 <div className="flex items-end gap-2">
@@ -146,8 +161,13 @@ export function FixedExpenses({ monthId, expenses, isReadOnly, onUpdate }: Fixed
                   </button>
                 </div>
               ) : (
-                <div className="flex items-center justify-between py-2 border-b border-sand-200 dark:border-charcoal-800">
-                  <span className="text-sm">{expense.label}</span>
+                <div className="flex items-center justify-between gap-3 py-2 border-b border-sand-200 dark:border-charcoal-800">
+                  <div className="flex min-w-0 items-center gap-2">
+                    {expenses.length > 1 && (
+                      <ReorderControls index={index} total={expenses.length} onMove={handleMove} />
+                    )}
+                    <span className="truncate text-sm">{expense.label}</span>
+                  </div>
                   <div className="flex items-center gap-2">
                     <span className="text-sm">{formatCurrency(expense.amount)}</span>
                     <button
@@ -208,4 +228,3 @@ export function FixedExpenses({ monthId, expenses, isReadOnly, onUpdate }: Fixed
     </>
   );
 }
-

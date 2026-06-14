@@ -40,6 +40,11 @@ pub struct UpdateItem {
     pub savings_destination: Option<String>,
 }
 
+#[derive(Deserialize, ToSchema)]
+pub struct ReorderItems {
+    pub ids: Vec<i64>,
+}
+
 #[utoipa::path(
     get, path = "/api/months/{id}/items",
     params(("id" = i64, Path)),
@@ -64,7 +69,7 @@ pub async fn list_items(
         FROM items i
         JOIN budget_categories bc ON i.category_id = bc.id
         WHERE i.month_id = ?
-        ORDER BY i.spent_on DESC
+        ORDER BY i.sort_order, i.id
         "#,
     )
     .bind(month_id)
@@ -103,8 +108,15 @@ pub async fn create_item(
             .await?
             .ok_or(PaymeError::BadRequest("Invalid category".to_string()))?;
 
+    let sort_order: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM items WHERE month_id = ?",
+    )
+    .bind(month_id)
+    .fetch_one(&pool)
+    .await?;
+
     let id: i64 = sqlx::query_scalar(
-        "INSERT INTO items (month_id, category_id, description, amount, spent_on, savings_destination) VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+        "INSERT INTO items (month_id, category_id, description, amount, spent_on, savings_destination, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(month_id)
     .bind(payload.category_id)
@@ -112,6 +124,7 @@ pub async fn create_item(
     .bind(payload.amount)
     .bind(payload.spent_on)
     .bind(&payload.savings_destination)
+    .bind(sort_order)
     .fetch_one(&pool)
     .await?;
 
@@ -199,7 +212,6 @@ pub async fn update_item(
                 .ok_or(PaymeError::BadRequest("Invalid category".to_string()))?;
     }
 
-    // Update the item first to ensure data consistency
     sqlx::query(
         "UPDATE items SET category_id = ?, description = ?, amount = ?, spent_on = ?, savings_destination = ? WHERE id = ?",
     )
@@ -215,7 +227,6 @@ pub async fn update_item(
     let old_dest = existing.savings_destination.as_str();
     let new_dest = savings_destination.as_str();
 
-    // Adjust balances only after successful item update
     if old_dest != new_dest || (old_dest != "none" && existing.amount != amount) {
         match old_dest {
             "savings" => {
@@ -267,6 +278,26 @@ pub async fn update_item(
         spent_on,
         savings_destination,
     }))
+}
+
+pub async fn reorder_items(
+    State(pool): State<SqlitePool>,
+    axum::Extension(claims): axum::Extension<Claims>,
+    Path(month_id): Path<i64>,
+    Json(payload): Json<ReorderItems>,
+) -> Result<StatusCode, PaymeError> {
+    verify_month_not_closed(&pool, claims.sub, month_id).await?;
+
+    for (index, id) in payload.ids.iter().enumerate() {
+        sqlx::query("UPDATE items SET sort_order = ? WHERE id = ? AND month_id = ?")
+            .bind(index as i64)
+            .bind(id)
+            .bind(month_id)
+            .execute(&pool)
+            .await?;
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(

@@ -52,6 +52,7 @@ pub struct IncomeEntry {
     pub month_id: i64,
     pub label: String,
     pub amount: f64,
+    pub paid_on: Option<NaiveDate>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, ToSchema)]

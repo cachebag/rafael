@@ -1,10 +1,11 @@
 import { useState, useMemo } from "react";
-import { Plus, Trash2, Edit2, Check, X, ArrowUpDown, ArrowUp, ArrowDown, Search, Filter } from "lucide-react";
+import { Plus, Trash2, Edit2, Check, X, Search, Filter } from "lucide-react";
 import { ItemWithCategory, BudgetCategory, api } from "../api/client";
 import { Card } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { Select } from "./ui/Select";
 import { Button } from "./ui/Button";
+import { ReorderControls } from "./ui/ReorderControls";
 import { useCurrency } from "../context/CurrencyContext";
 
 interface ItemsSectionProps {
@@ -14,25 +15,6 @@ interface ItemsSectionProps {
   isReadOnly: boolean;
   onUpdate: () => void;
 }
-
-type SortField = "spent_on" | "description" | "category_label" | "amount";
-
-const SortIcon = ({
-  field,
-  sortField,
-  sortDirection,
-}: {
-  field: SortField;
-  sortField: SortField;
-  sortDirection: "asc" | "desc";
-}) => {
-  if (sortField !== field) return <ArrowUpDown size={14} className="ml-1 opacity-20" />;
-  return sortDirection === "asc" ? (
-    <ArrowUp size={14} className="ml-1 text-sage-600" />
-  ) : (
-    <ArrowDown size={14} className="ml-1 text-sage-600" />
-  );
-};
 
 export function ItemsSection({
   monthId,
@@ -49,9 +31,6 @@ export function ItemsSection({
   const [categoryId, setCategoryId] = useState<string>("");
   const [spentOn, setSpentOn] = useState(new Date().toISOString().split("T")[0]);
 
-  // Sorting and Filtering State
-  const [sortField, setSortField] = useState<SortField>("spent_on");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -103,24 +82,18 @@ export function ItemsSection({
     setIsAdding(false);
   };
 
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
-    } else {
-      setSortField(field);
-      setSortDirection("asc");
-    }
-  };
-
   const categoryOptions = categories.map((c) => ({ value: c.id, label: c.label }));
   const filterCategoryOptions = [
     { value: "all", label: "All Categories" },
     ...categoryOptions,
   ];
 
+  const allSpendingItems = useMemo(() => {
+    return items.filter((item) => item.savings_destination === "none");
+  }, [items]);
+
   const spendingItems = useMemo(() => {
-    return items
-      .filter((item) => item.savings_destination === "none")
+    return allSpendingItems
       .filter((item) => {
         const matchesCategory =
           filterCategory === "all" || item.category_id.toString() === filterCategory;
@@ -128,16 +101,25 @@ export function ItemsSection({
           item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
           item.category_label.toLowerCase().includes(searchQuery.toLowerCase());
         return matchesCategory && matchesSearch;
-      })
-      .sort((a, b) => {
-        const aValue = a[sortField];
-        const bValue = b[sortField];
-
-        if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
-        if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
-        return 0;
       });
-  }, [items, sortField, sortDirection, filterCategory, searchQuery]);
+  }, [allSpendingItems, filterCategory, searchQuery]);
+
+  const handleMove = async (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= spendingItems.length) return;
+    const currentItem = spendingItems[index];
+    const targetItem = spendingItems[nextIndex];
+    const currentFullIndex = allSpendingItems.findIndex((item) => item.id === currentItem.id);
+    const targetFullIndex = allSpendingItems.findIndex((item) => item.id === targetItem.id);
+    if (currentFullIndex < 0 || targetFullIndex < 0) return;
+    const next = [...allSpendingItems];
+    [next[currentFullIndex], next[targetFullIndex]] = [
+      next[targetFullIndex],
+      next[currentFullIndex],
+    ];
+    await api.items.reorder(monthId, next.map((item) => item.id));
+    await onUpdate();
+  };
 
   return (
     <Card className="col-span-full">
@@ -215,7 +197,6 @@ export function ItemsSection({
         </div>
       )}
 
-      {/* Filtering and Search Controls */}
       <div className="flex flex-col md:flex-row gap-2 mb-4 bg-sand-100/50 dark:bg-charcoal-800/50 p-2 rounded-lg border border-sand-200 dark:border-charcoal-700">
         <div className="relative flex-1">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400" />
@@ -256,43 +237,23 @@ export function ItemsSection({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-sand-300 dark:border-charcoal-700">
-              <th
-                className="text-left py-2 px-1 font-medium text-charcoal-600 dark:text-sand-400 text-xs md:text-sm cursor-pointer hover:text-charcoal-900 dark:hover:text-sand-200 transition-colors select-none"
-                onClick={() => handleSort("spent_on")}
-              >
-                <div className="flex items-center">
-                  Date <SortIcon field="spent_on" sortField={sortField} sortDirection={sortDirection} />
-                </div>
+              <th className="text-left py-2 px-1 font-medium text-charcoal-600 dark:text-sand-400 text-xs md:text-sm">
+                Date
               </th>
-              <th
-                className="text-left py-2 px-1 font-medium text-charcoal-600 dark:text-sand-400 text-xs md:text-sm cursor-pointer hover:text-charcoal-900 dark:hover:text-sand-200 transition-colors select-none"
-                onClick={() => handleSort("description")}
-              >
-                <div className="flex items-center">
-                  Description <SortIcon field="description" sortField={sortField} sortDirection={sortDirection} />
-                </div>
+              <th className="text-left py-2 px-1 font-medium text-charcoal-600 dark:text-sand-400 text-xs md:text-sm">
+                Description
               </th>
-              <th
-                className="text-left py-2 px-1 font-medium text-charcoal-600 dark:text-sand-400 text-xs md:text-sm cursor-pointer hover:text-charcoal-900 dark:hover:text-sand-200 transition-colors select-none"
-                onClick={() => handleSort("category_label")}
-              >
-                <div className="flex items-center">
-                  Category <SortIcon field="category_label" sortField={sortField} sortDirection={sortDirection} />
-                </div>
+              <th className="text-left py-2 px-1 font-medium text-charcoal-600 dark:text-sand-400 text-xs md:text-sm">
+                Category
               </th>
-              <th
-                className="text-right py-2 px-1 font-medium text-charcoal-600 dark:text-sand-400 text-xs md:text-sm cursor-pointer hover:text-charcoal-900 dark:hover:text-sand-200 transition-colors select-none"
-                onClick={() => handleSort("amount")}
-              >
-                <div className="flex items-center justify-end">
-                  Amount <SortIcon field="amount" sortField={sortField} sortDirection={sortDirection} />
-                </div>
+              <th className="text-right py-2 px-1 font-medium text-charcoal-600 dark:text-sand-400 text-xs md:text-sm">
+                Amount
               </th>
-              {!isReadOnly && <th className="w-16 md:w-20"></th>}
+              {!isReadOnly && <th className="w-28 md:w-32"></th>}
             </tr>
           </thead>
           <tbody>
-            {spendingItems.map((item) => (
+            {spendingItems.map((item, index) => (
               <tr
                 key={item.id}
                 className="border-b border-sand-200 dark:border-charcoal-800 hover:bg-sand-100 dark:hover:bg-charcoal-900/50 active:bg-sand-200 dark:active:bg-charcoal-900 transition-colors"
@@ -378,6 +339,14 @@ export function ItemsSection({
                     {!isReadOnly && (
                       <td className="py-2 px-1">
                         <div className="flex gap-0.5 md:gap-1 justify-end">
+                          {spendingItems.length > 1 && (
+                            <ReorderControls
+                              index={index}
+                              total={spendingItems.length}
+                              onMove={handleMove}
+                              className="mr-1"
+                            />
+                          )}
                           <button
                             onClick={() => startEdit(item)}
                             className="p-2 md:p-1 hover:bg-sand-200 dark:hover:bg-charcoal-800 active:bg-sand-300 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"

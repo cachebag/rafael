@@ -30,6 +30,11 @@ pub struct UpdateCategory {
     pub color: Option<String>,
 }
 
+#[derive(Deserialize, ToSchema)]
+pub struct ReorderCategories {
+    pub ids: Vec<i64>,
+}
+
 #[derive(Deserialize, ToSchema, Validate)]
 pub struct UpdateMonthlyBudget {
     #[validate(range(min = 0.0))]
@@ -52,7 +57,7 @@ pub async fn list_categories(
     axum::Extension(claims): axum::Extension<Claims>,
 ) -> Result<Json<Vec<BudgetCategory>>, PaymeError> {
     let categories: Vec<BudgetCategory> = sqlx::query_as(
-        "SELECT id, user_id, label, default_amount, color FROM budget_categories WHERE user_id = ?",
+        "SELECT id, user_id, label, default_amount, color FROM budget_categories WHERE user_id = ? ORDER BY sort_order, id",
     )
     .bind(claims.sub)
     .fetch_all(&pool)
@@ -80,13 +85,21 @@ pub async fn create_category(
 ) -> Result<Json<BudgetCategory>, PaymeError> {
     payload.validate()?;
     let color = payload.color.unwrap_or_else(|| "#71717a".to_string());
+    let sort_order: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM budget_categories WHERE user_id = ?",
+    )
+    .bind(claims.sub)
+    .fetch_one(&pool)
+    .await?;
+
     let id: i64 = sqlx::query_scalar(
-        "INSERT INTO budget_categories (user_id, label, default_amount, color) VALUES (?, ?, ?, ?) RETURNING id",
+        "INSERT INTO budget_categories (user_id, label, default_amount, color, sort_order) VALUES (?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(claims.sub)
     .bind(&payload.label)
     .bind(payload.default_amount)
     .bind(&color)
+    .bind(sort_order)
     .fetch_one(&pool)
     .await?;
 
@@ -167,6 +180,23 @@ pub async fn update_category(
         default_amount,
         color,
     }))
+}
+
+pub async fn reorder_categories(
+    State(pool): State<SqlitePool>,
+    axum::Extension(claims): axum::Extension<Claims>,
+    Json(payload): Json<ReorderCategories>,
+) -> Result<StatusCode, PaymeError> {
+    for (index, id) in payload.ids.iter().enumerate() {
+        sqlx::query("UPDATE budget_categories SET sort_order = ? WHERE id = ? AND user_id = ?")
+            .bind(index as i64)
+            .bind(id)
+            .bind(claims.sub)
+            .execute(&pool)
+            .await?;
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(

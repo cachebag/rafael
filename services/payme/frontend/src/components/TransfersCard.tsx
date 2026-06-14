@@ -5,6 +5,7 @@ import { Card } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { Select } from "./ui/Select";
 import { Button } from "./ui/Button";
+import { ReorderControls } from "./ui/ReorderControls";
 import { useCurrency } from "../context/CurrencyContext";
 import { useUIPreferences } from "../context/UIPreferencesContext";
 
@@ -68,6 +69,15 @@ export function TransfersCard({
 
   const handleDelete = async (id: number) => {
     await api.items.delete(monthId, id);
+    await onUpdate();
+  };
+
+  const handleMove = async (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= transferItems.length) return;
+    const next = [...transferItems];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    await api.items.reorder(monthId, next.map((item) => item.id));
     await onUpdate();
   };
 
@@ -170,11 +180,11 @@ export function TransfersCard({
               <th className="text-right py-2 px-1 font-medium text-charcoal-600 dark:text-sand-400 text-xs md:text-sm">
                 Amount
               </th>
-              {!isReadOnly && <th className="w-16 md:w-20"></th>}
+              {!isReadOnly && transfersEnabled && <th className="w-28 md:w-32"></th>}
             </tr>
           </thead>
           <tbody>
-            {transferItems.map((item) => (
+            {transferItems.map((item, index) => (
               <tr
                 key={item.id}
                 className="border-b border-sand-200 dark:border-charcoal-800 hover:bg-sand-100 dark:hover:bg-charcoal-900/50 active:bg-sand-200 dark:active:bg-charcoal-900 transition-colors"
@@ -263,6 +273,14 @@ export function TransfersCard({
                     {!isReadOnly && transfersEnabled && (
                       <td className="py-2 px-1">
                         <div className="flex gap-0.5 md:gap-1 justify-end">
+                          {transferItems.length > 1 && (
+                            <ReorderControls
+                              index={index}
+                              total={transferItems.length}
+                              onMove={handleMove}
+                              className="mr-1"
+                            />
+                          )}
                           <button
                             onClick={() => startEdit(item)}
                             className="p-2 md:p-1 hover:bg-sand-200 dark:hover:bg-charcoal-800 active:bg-sand-300 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"

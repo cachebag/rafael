@@ -3,6 +3,7 @@ import { Trash2, Edit2, Check, X } from "lucide-react";
 import { Card } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { Button } from "./ui/Button";
+import { ReorderControls } from "./ui/ReorderControls";
 import { useCurrency } from "../context/CurrencyContext";
 import { useUIPreferences } from "../context/UIPreferencesContext";
 import { api, RetirementBreakdownItem } from "../api/client";
@@ -73,6 +74,21 @@ export function RetirementBreakdownCard() {
       window.dispatchEvent(new CustomEvent("retirementBreakdownUpdated", { detail: updated }));
     } catch (e) {
       console.error("Failed to delete retirement breakdown item:", e);
+    }
+  };
+
+  const handleMove = async (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= breakdownItems.length) return;
+    const next = [...breakdownItems];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+
+    try {
+      await api.retirementBreakdown.reorder(next.map((item) => item.id));
+      setBreakdownItems(next);
+      window.dispatchEvent(new CustomEvent("retirementBreakdownUpdated", { detail: next }));
+    } catch (e) {
+      console.error("Failed to reorder retirement breakdown:", e);
     }
   };
 
@@ -151,11 +167,11 @@ export function RetirementBreakdownCard() {
               <th className="text-right py-2 px-1 font-medium text-charcoal-600 dark:text-sand-400 text-xs md:text-sm">
                 Amount
               </th>
-              {retirementBreakdownEnabled && <th className="w-16 md:w-20"></th>}
+              {retirementBreakdownEnabled && <th className="w-28 md:w-32"></th>}
             </tr>
           </thead>
           <tbody>
-            {breakdownItems.map((item) => {
+            {breakdownItems.map((item, index) => {
               return (
                 <tr
                   key={item.id}
@@ -208,6 +224,14 @@ export function RetirementBreakdownCard() {
                       {retirementBreakdownEnabled && (
                         <td className="py-2 px-1">
                           <div className="flex gap-0.5 md:gap-1 justify-end">
+                            {breakdownItems.length > 1 && (
+                              <ReorderControls
+                                index={index}
+                                total={breakdownItems.length}
+                                onMove={handleMove}
+                                className="mr-1"
+                              />
+                            )}
                             <button
                               onClick={() => startEdit(item)}
                               className="p-2 md:p-1 hover:bg-sand-200 dark:hover:bg-charcoal-800 active:bg-sand-300 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"

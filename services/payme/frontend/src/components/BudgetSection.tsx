@@ -6,6 +6,7 @@ import { Input } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { ProgressBar } from "./ui/ProgressBar";
 import { Modal } from "./ui/Modal";
+import { ReorderControls } from "./ui/ReorderControls";
 import { useCurrency } from "../context/CurrencyContext";
 
 interface BudgetSectionProps {
@@ -33,16 +34,16 @@ export function BudgetSection({
   const [color, setColor] = useState("#71717a");
 
   const PRESET_COLORS = [
-    "#71717a", // Zinc
-    "#ef4444", // Red
-    "#f97316", // Orange
-    "#f59e0b", // Amber
-    "#10b981", // Emerald
-    "#06b6d4", // Cyan
-    "#3b82f6", // Blue
-    "#6366f1", // Indigo
-    "#8b5cf6", // Violet
-    "#d946ef", // Fuchsia
+    "#71717a",
+    "#ef4444",
+    "#f97316",
+    "#f59e0b",
+    "#10b981",
+    "#06b6d4",
+    "#3b82f6",
+    "#6366f1",
+    "#8b5cf6",
+    "#d946ef",
   ];
 
   const handleAddCategory = async () => {
@@ -75,6 +76,24 @@ export function BudgetSection({
     await api.budgets.update(monthId, budgetId, parseFloat(amount));
     setEditingBudgetId(null);
     setAmount("");
+    await onUpdate();
+  };
+
+  const handleMoveBudget = async (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= budgets.length) return;
+    const next = [...budgets];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    await api.categories.reorder(next.map((budget) => budget.category_id));
+    await onUpdate();
+  };
+
+  const handleMoveCategory = async (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= categories.length) return;
+    const next = [...categories];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    await api.categories.reorder(next.map((category) => category.id));
     await onUpdate();
   };
 
@@ -115,7 +134,7 @@ export function BudgetSection({
         </div>
 
         <div className="space-y-4">
-          {budgets.map((budget) => (
+          {budgets.map((budget, index) => (
             <div key={budget.id}>
               {editingBudgetId === budget.id && !isReadOnly ? (
                 <div className="flex items-end gap-2">
@@ -146,12 +165,19 @@ export function BudgetSection({
               ) : (
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      {!isReadOnly && budgets.length > 1 && (
+                        <ReorderControls
+                          index={index}
+                          total={budgets.length}
+                          onMove={handleMoveBudget}
+                        />
+                      )}
                       <div
                         className="w-2 h-2 rounded-sm"
                         style={{ backgroundColor: budget.category_color }}
                       />
-                      <span className="text-sm text-charcoal-700 dark:text-sand-300">
+                      <span className="truncate text-sm text-charcoal-700 dark:text-sand-300">
                         {budget.category_label}
                       </span>
                     </div>
@@ -187,7 +213,7 @@ export function BudgetSection({
           Categories define your budget types. Default amounts apply to new months.
         </p>
         <div className="space-y-3">
-          {categories.map((cat) => (
+          {categories.map((cat, index) => (
             <div key={cat.id}>
               {editingCategoryId === cat.id ? (
                 <div className="space-y-3 p-3 bg-sand-100 dark:bg-charcoal-900/50 rounded-lg">
@@ -236,13 +262,20 @@ export function BudgetSection({
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center justify-between py-2 border-b border-sand-200 dark:border-charcoal-800">
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between gap-3 py-2 border-b border-sand-200 dark:border-charcoal-800">
+                  <div className="flex min-w-0 items-center gap-2">
+                    {categories.length > 1 && (
+                      <ReorderControls
+                        index={index}
+                        total={categories.length}
+                        onMove={handleMoveCategory}
+                      />
+                    )}
                     <div
                       className="w-3 h-3 rounded-sm"
                       style={{ backgroundColor: cat.color }}
                     />
-                    <span className="text-sm">{cat.label}</span>
+                    <span className="truncate text-sm">{cat.label}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-charcoal-500">
@@ -322,4 +355,3 @@ export function BudgetSection({
     </>
   );
 }
-

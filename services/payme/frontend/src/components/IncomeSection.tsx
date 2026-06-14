@@ -4,6 +4,7 @@ import { IncomeEntry, api } from "../api/client";
 import { Card } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { Button } from "./ui/Button";
+import { ReorderControls } from "./ui/ReorderControls";
 import { useCurrency } from "../context/CurrencyContext";
 
 interface IncomeSectionProps {
@@ -15,26 +16,38 @@ interface IncomeSectionProps {
 
 export function IncomeSection({ monthId, entries, isReadOnly, onUpdate }: IncomeSectionProps) {
   const { formatCurrency } = useCurrency();
+  const today = new Date().toISOString().split("T")[0];
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
+  const [paidOn, setPaidOn] = useState(today);
 
   const handleAdd = async () => {
     if (!label || !amount) return;
-    await api.income.create(monthId, { label, amount: parseFloat(amount) });
+    await api.income.create(monthId, {
+      label,
+      amount: parseFloat(amount),
+      paid_on: paidOn || null,
+    });
     setLabel("");
     setAmount("");
+    setPaidOn(today);
     setIsAdding(false);
     await onUpdate();
   };
 
   const handleUpdate = async (id: number) => {
     if (!label || !amount) return;
-    await api.income.update(monthId, id, { label, amount: parseFloat(amount) });
+    await api.income.update(monthId, id, {
+      label,
+      amount: parseFloat(amount),
+      paid_on: paidOn || null,
+    });
     setEditingId(null);
     setLabel("");
     setAmount("");
+    setPaidOn(today);
     await onUpdate();
   };
 
@@ -47,13 +60,24 @@ export function IncomeSection({ monthId, entries, isReadOnly, onUpdate }: Income
     setEditingId(entry.id);
     setLabel(entry.label);
     setAmount(entry.amount.toString());
+    setPaidOn(entry.paid_on ?? "");
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setLabel("");
     setAmount("");
+    setPaidOn(today);
     setIsAdding(false);
+  };
+
+  const handleMove = async (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= entries.length) return;
+    const next = [...entries];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    await api.income.reorder(monthId, next.map((entry) => entry.id));
+    await onUpdate();
   };
 
   return (
@@ -73,23 +97,30 @@ export function IncomeSection({ monthId, entries, isReadOnly, onUpdate }: Income
       </div>
 
       <div className="space-y-3">
-        {entries.map((entry) => (
+        {entries.map((entry, index) => (
           <div key={entry.id}>
             {editingId === entry.id ? (
-              <div className="flex items-end gap-2">
-                <div className="flex-1">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-0 flex-[1_1_10rem]">
                   <Input
                     placeholder="Label"
                     value={label}
                     onChange={(e) => setLabel(e.target.value)}
                   />
                 </div>
-                <div className="w-24">
+                <div className="w-28">
                   <Input
                     type="number"
                     placeholder="Amount"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
+                  />
+                </div>
+                <div className="w-36">
+                  <Input
+                    type="date"
+                    value={paidOn}
+                    onChange={(e) => setPaidOn(e.target.value)}
                   />
                 </div>
                 <button
@@ -106,10 +137,22 @@ export function IncomeSection({ monthId, entries, isReadOnly, onUpdate }: Income
                 </button>
               </div>
             ) : (
-              <div className="flex items-center justify-between py-2 border-b border-sand-200 dark:border-charcoal-800">
-                <span className="text-sm text-charcoal-700 dark:text-sand-300">
-                  {entry.label}
-                </span>
+              <div className="flex items-center justify-between gap-3 py-2 border-b border-sand-200 dark:border-charcoal-800">
+                <div className="flex min-w-0 items-center gap-2">
+                  {!isReadOnly && entries.length > 1 && (
+                    <ReorderControls index={index} total={entries.length} onMove={handleMove} />
+                  )}
+                  <div className="min-w-0">
+                    <div className="truncate text-sm text-charcoal-700 dark:text-sand-300">
+                      {entry.label}
+                    </div>
+                    {entry.paid_on && (
+                      <div className="text-xs text-charcoal-400 dark:text-charcoal-500">
+                        {entry.paid_on}
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-sage-600 dark:text-sage-400">
                     {formatCurrency(entry.amount)}
@@ -118,7 +161,7 @@ export function IncomeSection({ monthId, entries, isReadOnly, onUpdate }: Income
                     <>
                       <button
                         onClick={() => startEdit(entry)}
-                        className="p-1 opacity-0 group-hover:opacity-100 hover:bg-sand-200 dark:hover:bg-charcoal-800 transition-all"
+                        className="p-1 hover:bg-sand-200 dark:hover:bg-charcoal-800 transition-colors"
                       >
                         <Edit2 size={14} />
                       </button>
@@ -137,20 +180,27 @@ export function IncomeSection({ monthId, entries, isReadOnly, onUpdate }: Income
         ))}
 
         {isAdding && (
-          <div className="flex items-end gap-2 pt-2">
-            <div className="flex-1">
+          <div className="flex flex-wrap items-end gap-2 pt-2">
+            <div className="min-w-0 flex-[1_1_10rem]">
               <Input
                 placeholder="Label"
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
               />
             </div>
-            <div className="w-24">
+            <div className="w-28">
               <Input
                 type="number"
                 placeholder="Amount"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
+              />
+            </div>
+            <div className="w-36">
+              <Input
+                type="date"
+                value={paidOn}
+                onChange={(e) => setPaidOn(e.target.value)}
               />
             </div>
             <Button size="sm" onClick={handleAdd}>
@@ -171,4 +221,3 @@ export function IncomeSection({ monthId, entries, isReadOnly, onUpdate }: Income
     </Card>
   );
 }
-
