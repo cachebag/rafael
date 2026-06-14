@@ -22,7 +22,7 @@ chrono = { version = "0.4.45", features = ["serde"] }
 printpdf = "0.9.1"
 uuid = { version = "1.23.3", features = ["v4"] }
 dotenvy = "0.15.7"
-time = "0.3.47"
+time = "0.3.49"
 utoipa = { version = "5.5.0", features = ["axum_extras", "chrono" ] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 thiserror = "2.0.18"
