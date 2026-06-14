@@ -116,7 +116,7 @@ export function IncomeSection({ monthId, entries, isReadOnly, onUpdate }: Income
                     onChange={(e) => setAmount(e.target.value)}
                   />
                 </div>
-                <div className="w-36">
+                <div className="w-44">
                   <Input
                     type="date"
                     value={paidOn}
@@ -196,7 +196,7 @@ export function IncomeSection({ monthId, entries, isReadOnly, onUpdate }: Income
                 onChange={(e) => setAmount(e.target.value)}
               />
             </div>
-            <div className="w-36">
+            <div className="w-44">
               <Input
                 type="date"
                 value={paidOn}

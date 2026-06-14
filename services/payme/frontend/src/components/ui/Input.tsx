@@ -9,6 +9,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ label, className = "", type = "text", min, max, step, disabled, readOnly, ...props }, ref) => {
     const inputRef = useRef<HTMLInputElement | null>(null);
     const isNumber = type === "number";
+    const isDate = type === "date";
     const inputType = isNumber ? "text" : type;
     const isCounterDisabled = disabled || readOnly;
 
@@ -71,7 +72,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         step={step}
         disabled={disabled}
         readOnly={readOnly}
-        className={`w-full rounded-md border border-sand-300 bg-charcoal-50 px-3 py-2.5 text-base text-charcoal-900 outline-none transition-colors placeholder:text-charcoal-400 focus:border-sage-500 md:py-2 md:text-sm dark:border-charcoal-700 dark:bg-charcoal-950/60 dark:text-sand-100 dark:placeholder:text-charcoal-500 dark:focus:border-sage-500 touch-manipulation ${className} ${isNumber ? "pr-8" : ""}`}
+        className={`w-full rounded-md border border-sand-300 bg-charcoal-50 px-3 py-2.5 text-base text-charcoal-900 outline-none transition-colors placeholder:text-charcoal-400 focus:border-sage-500 md:py-2 md:text-sm dark:border-charcoal-700 dark:bg-charcoal-950/60 dark:text-sand-100 dark:placeholder:text-charcoal-500 dark:focus:border-sage-500 touch-manipulation ${className} ${isNumber ? "pr-8" : ""} ${isDate ? "min-w-[11rem] pr-9" : ""}`}
         {...props}
       />
     );
