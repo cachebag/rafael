@@ -4,9 +4,11 @@ import { Card } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { ReorderControls } from "./ui/ReorderControls";
+import { SortableHandle, SortableItem, SortableList } from "./ui/SortableList";
 import { useCurrency } from "../context/CurrencyContext";
 import { useUIPreferences } from "../context/UIPreferencesContext";
 import { api, RetirementBreakdownItem } from "../api/client";
+import { useSortableReorder } from "../hooks/useSortableReorder";
 
 export function RetirementBreakdownCard() {
   const { formatCurrency } = useCurrency();
@@ -18,6 +20,15 @@ export function RetirementBreakdownCard() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
+  const {
+    orderedItems: orderedBreakdownItems,
+    itemIds: breakdownItemIds,
+    handleDragEnd: handleBreakdownDragEnd,
+  } = useSortableReorder(breakdownItems, async (nextItems) => {
+    await api.retirementBreakdown.reorder(nextItems.map((item) => item.id));
+    setBreakdownItems(nextItems);
+    window.dispatchEvent(new CustomEvent("retirementBreakdownUpdated", { detail: nextItems }));
+  });
 
   useEffect(() => {
     api.retirementBreakdown
@@ -79,8 +90,8 @@ export function RetirementBreakdownCard() {
 
   const handleMove = async (index: number, direction: -1 | 1) => {
     const nextIndex = index + direction;
-    if (nextIndex < 0 || nextIndex >= breakdownItems.length) return;
-    const next = [...breakdownItems];
+    if (nextIndex < 0 || nextIndex >= orderedBreakdownItems.length) return;
+    const next = [...orderedBreakdownItems];
     [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
 
     try {
@@ -171,87 +182,96 @@ export function RetirementBreakdownCard() {
             </tr>
           </thead>
           <tbody>
-            {breakdownItems.map((item, index) => {
+            <SortableList ids={breakdownItemIds} onDragEnd={handleBreakdownDragEnd}>
+              {orderedBreakdownItems.map((item, index) => {
               return (
-                <tr
+                <SortableItem
                   key={item.id}
+                  id={item.id}
+                  as="tr"
                   className="border-b border-sand-200 dark:border-charcoal-800 hover:bg-sand-100 dark:hover:bg-charcoal-900/50 active:bg-sand-200 dark:active:bg-charcoal-900 transition-colors"
                 >
-                  {editingId === item.id ? (
-                    <>
-                      <td className="py-2">
-                        <Input
-                          placeholder="Label"
-                          value={label}
-                          onChange={(e) => setLabel(e.target.value)}
-                          className="text-xs"
-                        />
-                      </td>
-                      <td className="py-2">
-                        <Input
-                          type="number"
-                          placeholder="Amount"
-                          value={amount}
-                          onChange={(e) => setAmount(e.target.value)}
-                          className="text-xs text-right"
-                        />
-                      </td>
-                      <td className="py-2">
-                        <div className="flex gap-0.5 md:gap-1 justify-end">
-                          <button
-                            onClick={() => handleUpdate(item.id)}
-                            className="p-2 md:p-1 text-sage-600 hover:bg-sage-100 dark:hover:bg-charcoal-800 active:bg-sage-200 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
-                          >
-                            <Check size={14} />
-                          </button>
-                          <button
-                            onClick={resetForm}
-                            className="p-2 md:p-1 text-charcoal-500 hover:bg-sand-200 dark:hover:bg-charcoal-800 active:bg-sand-300 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
-                          >
-                            <X size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="py-2 px-1 text-charcoal-800 dark:text-sand-200 text-xs md:text-sm font-medium">
-                        {item.label}
-                      </td>
-                      <td className="py-2 px-1 text-right font-medium text-xs md:text-sm whitespace-nowrap text-sage-600 dark:text-sage-400">
-                        {formatCurrency(item.amount)}
-                      </td>
-                      {retirementBreakdownEnabled && (
-                        <td className="py-2 px-1">
+                  {({ attributes, listeners }) =>
+                    editingId === item.id ? (
+                      <>
+                        <td className="py-2">
+                          <Input
+                            placeholder="Label"
+                            value={label}
+                            onChange={(e) => setLabel(e.target.value)}
+                            className="text-xs"
+                          />
+                        </td>
+                        <td className="py-2">
+                          <Input
+                            type="number"
+                            placeholder="Amount"
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
+                            className="text-xs text-right"
+                          />
+                        </td>
+                        <td className="py-2">
                           <div className="flex gap-0.5 md:gap-1 justify-end">
-                            {breakdownItems.length > 1 && (
-                              <ReorderControls
-                                index={index}
-                                total={breakdownItems.length}
-                                onMove={handleMove}
-                                className="mr-1"
-                              />
-                            )}
                             <button
-                              onClick={() => startEdit(item)}
-                              className="p-2 md:p-1 hover:bg-sand-200 dark:hover:bg-charcoal-800 active:bg-sand-300 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
+                              onClick={() => handleUpdate(item.id)}
+                              className="p-2 md:p-1 text-sage-600 hover:bg-sage-100 dark:hover:bg-charcoal-800 active:bg-sage-200 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
                             >
-                              <Edit2 size={14} />
+                              <Check size={14} />
                             </button>
                             <button
-                              onClick={() => handleDelete(item.id)}
-                              className="p-2 md:p-1 text-terracotta-500 hover:bg-terracotta-100 dark:hover:bg-charcoal-800 active:bg-terracotta-200 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
+                              onClick={resetForm}
+                              className="p-2 md:p-1 text-charcoal-500 hover:bg-sand-200 dark:hover:bg-charcoal-800 active:bg-sand-300 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
                             >
-                              <Trash2 size={14} />
+                              <X size={14} />
                             </button>
                           </div>
                         </td>
-                      )}
-                    </>
-                  )}
-                </tr>
+                      </>
+                    ) : (
+                      <>
+                        <td className="py-2 px-1 text-charcoal-800 dark:text-sand-200 text-xs md:text-sm font-medium">
+                          {item.label}
+                        </td>
+                        <td className="py-2 px-1 text-right font-medium text-xs md:text-sm whitespace-nowrap text-sage-600 dark:text-sage-400">
+                          {formatCurrency(item.amount)}
+                        </td>
+                        {retirementBreakdownEnabled && (
+                          <td className="py-2 px-1">
+                            <div className="flex gap-0.5 md:gap-1 justify-end">
+                              {orderedBreakdownItems.length > 1 && (
+                                <>
+                                  <SortableHandle attributes={attributes} listeners={listeners} />
+                                  <ReorderControls
+                                    index={index}
+                                    total={orderedBreakdownItems.length}
+                                    onMove={handleMove}
+                                    className="mr-1"
+                                  />
+                                </>
+                              )}
+                              <button
+                                onClick={() => startEdit(item)}
+                                className="p-2 md:p-1 hover:bg-sand-200 dark:hover:bg-charcoal-800 active:bg-sand-300 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(item.id)}
+                                className="p-2 md:p-1 text-terracotta-500 hover:bg-terracotta-100 dark:hover:bg-charcoal-800 active:bg-terracotta-200 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        )}
+                      </>
+                    )
+                  }
+                </SortableItem>
               );
-            })}
+              })}
+            </SortableList>
           </tbody>
         </table>
 

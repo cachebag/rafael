@@ -6,7 +6,9 @@ import { Input } from "./ui/Input";
 import { Select } from "./ui/Select";
 import { Button } from "./ui/Button";
 import { ReorderControls } from "./ui/ReorderControls";
+import { SortableHandle, SortableItem, SortableList } from "./ui/SortableList";
 import { useCurrency } from "../context/CurrencyContext";
+import { useSortableReorder } from "../hooks/useSortableReorder";
 
 interface ItemsSectionProps {
   monthId: number;
@@ -91,9 +93,16 @@ export function ItemsSection({
   const allSpendingItems = useMemo(() => {
     return items.filter((item) => item.savings_destination === "none");
   }, [items]);
+  const {
+    orderedItems: orderedSpendingItems,
+    handleDragEnd: handleSpendingDragEnd,
+  } = useSortableReorder(allSpendingItems, async (nextItems) => {
+    await api.items.reorder(monthId, nextItems.map((item) => item.id));
+    await onUpdate();
+  });
 
   const spendingItems = useMemo(() => {
-    return allSpendingItems
+    return orderedSpendingItems
       .filter((item) => {
         const matchesCategory =
           filterCategory === "all" || item.category_id.toString() === filterCategory;
@@ -102,17 +111,17 @@ export function ItemsSection({
           item.category_label.toLowerCase().includes(searchQuery.toLowerCase());
         return matchesCategory && matchesSearch;
       });
-  }, [allSpendingItems, filterCategory, searchQuery]);
+  }, [orderedSpendingItems, filterCategory, searchQuery]);
 
   const handleMove = async (index: number, direction: -1 | 1) => {
     const nextIndex = index + direction;
     if (nextIndex < 0 || nextIndex >= spendingItems.length) return;
     const currentItem = spendingItems[index];
     const targetItem = spendingItems[nextIndex];
-    const currentFullIndex = allSpendingItems.findIndex((item) => item.id === currentItem.id);
-    const targetFullIndex = allSpendingItems.findIndex((item) => item.id === targetItem.id);
+    const currentFullIndex = orderedSpendingItems.findIndex((item) => item.id === currentItem.id);
+    const targetFullIndex = orderedSpendingItems.findIndex((item) => item.id === targetItem.id);
     if (currentFullIndex < 0 || targetFullIndex < 0) return;
-    const next = [...allSpendingItems];
+    const next = [...orderedSpendingItems];
     [next[currentFullIndex], next[targetFullIndex]] = [
       next[targetFullIndex],
       next[currentFullIndex],
@@ -253,119 +262,131 @@ export function ItemsSection({
             </tr>
           </thead>
           <tbody>
-            {spendingItems.map((item, index) => (
-              <tr
-                key={item.id}
-                className="border-b border-sand-200 dark:border-charcoal-800 hover:bg-sand-100 dark:hover:bg-charcoal-900/50 active:bg-sand-200 dark:active:bg-charcoal-900 transition-colors"
-              >
-                {editingId === item.id ? (
-                  <>
-                    <td className="py-2">
-                      <Input
-                        type="date"
-                        value={spentOn}
-                        onChange={(e) => setSpentOn(e.target.value)}
-                        className="text-xs"
-                      />
-                    </td>
-                    <td className="py-2">
-                      <Input
-                        placeholder="Description"
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
-                        className="text-xs"
-                      />
-                    </td>
-                    <td className="py-2">
-                      <Select
-                        options={categoryOptions}
-                        value={categoryId}
-                        onChange={(e) => setCategoryId(e.target.value)}
-                        className="text-xs"
-                      />
-                    </td>
-                    <td className="py-2">
-                      <Input
-                        type="number"
-                        placeholder="Amount"
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        className="text-xs text-right"
-                      />
-                    </td>
-                    <td className="py-2">
-                      <div className="flex gap-0.5 md:gap-1 justify-end">
-                        <button
-                          onClick={() => handleUpdate(item.id)}
-                          className="p-2 md:p-1 text-sage-600 hover:bg-sage-100 dark:hover:bg-charcoal-800 active:bg-sage-200 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
-                        >
-                          <Check size={14} />
-                        </button>
-                        <button
-                          onClick={resetForm}
-                          className="p-2 md:p-1 text-charcoal-500 hover:bg-sand-200 dark:hover:bg-charcoal-800 active:bg-sand-300 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </>
-                ) : (
-                  <>
-                    <td className="py-2 px-1 text-charcoal-600 dark:text-charcoal-400 text-xs md:text-sm whitespace-nowrap">
-                      <span className="hidden md:inline">{item.spent_on}</span>
-                      <span className="md:hidden">{item.spent_on.slice(5)}</span>
-                    </td>
-                    <td className="py-2 px-1 text-charcoal-800 dark:text-sand-200 text-xs md:text-sm">
-                      <div className="max-w-[120px] md:max-w-none truncate">
-                        {item.description}
-                      </div>
-                    </td>
-                    <td className="py-2 px-1">
-                      <span
-                        className="text-[10px] md:text-xs px-1.5 md:px-2 py-0.5 md:py-1 rounded-sm border whitespace-nowrap"
-                        style={{
-                          backgroundColor: `${item.category_color}20`,
-                          color: item.category_color,
-                          borderColor: `${item.category_color}40`,
-                        }}
-                      >
-                        {item.category_label}
-                      </span>
-                    </td>
-                    <td className={`py-2 px-1 text-right font-medium text-xs md:text-sm whitespace-nowrap text-terracotta-600 dark:text-terracotta-400`}>
-                      {formatCurrency(item.amount)}
-                    </td>
-                    {!isReadOnly && (
-                      <td className="py-2 px-1">
-                        <div className="flex gap-0.5 md:gap-1 justify-end">
-                          {spendingItems.length > 1 && (
-                            <ReorderControls
-                              index={index}
-                              total={spendingItems.length}
-                              onMove={handleMove}
-                              className="mr-1"
-                            />
-                          )}
-                          <button
-                            onClick={() => startEdit(item)}
-                            className="p-2 md:p-1 hover:bg-sand-200 dark:hover:bg-charcoal-800 active:bg-sand-300 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
+            <SortableList
+              ids={spendingItems.map((item) => item.id)}
+              onDragEnd={handleSpendingDragEnd}
+            >
+              {spendingItems.map((item, index) => (
+                <SortableItem
+                  key={item.id}
+                  id={item.id}
+                  as="tr"
+                  className="border-b border-sand-200 dark:border-charcoal-800 hover:bg-sand-100 dark:hover:bg-charcoal-900/50 active:bg-sand-200 dark:active:bg-charcoal-900 transition-colors"
+                >
+                  {({ attributes, listeners }) =>
+                    editingId === item.id ? (
+                      <>
+                        <td className="py-2">
+                          <Input
+                            type="date"
+                            value={spentOn}
+                            onChange={(e) => setSpentOn(e.target.value)}
+                            className="text-xs"
+                          />
+                        </td>
+                        <td className="py-2">
+                          <Input
+                            placeholder="Description"
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                            className="text-xs"
+                          />
+                        </td>
+                        <td className="py-2">
+                          <Select
+                            options={categoryOptions}
+                            value={categoryId}
+                            onChange={(e) => setCategoryId(e.target.value)}
+                            className="text-xs"
+                          />
+                        </td>
+                        <td className="py-2">
+                          <Input
+                            type="number"
+                            placeholder="Amount"
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
+                            className="text-xs text-right"
+                          />
+                        </td>
+                        <td className="py-2">
+                          <div className="flex gap-0.5 md:gap-1 justify-end">
+                            <button
+                              onClick={() => handleUpdate(item.id)}
+                              className="p-2 md:p-1 text-sage-600 hover:bg-sage-100 dark:hover:bg-charcoal-800 active:bg-sage-200 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
+                            >
+                              <Check size={14} />
+                            </button>
+                            <button
+                              onClick={resetForm}
+                              className="p-2 md:p-1 text-charcoal-500 hover:bg-sand-200 dark:hover:bg-charcoal-800 active:bg-sand-300 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="py-2 px-1 text-charcoal-600 dark:text-charcoal-400 text-xs md:text-sm whitespace-nowrap">
+                          <span className="hidden md:inline">{item.spent_on}</span>
+                          <span className="md:hidden">{item.spent_on.slice(5)}</span>
+                        </td>
+                        <td className="py-2 px-1 text-charcoal-800 dark:text-sand-200 text-xs md:text-sm">
+                          <div className="max-w-[120px] md:max-w-none truncate">
+                            {item.description}
+                          </div>
+                        </td>
+                        <td className="py-2 px-1">
+                          <span
+                            className="text-[10px] md:text-xs px-1.5 md:px-2 py-0.5 md:py-1 rounded-sm border whitespace-nowrap"
+                            style={{
+                              backgroundColor: `${item.category_color}20`,
+                              color: item.category_color,
+                              borderColor: `${item.category_color}40`,
+                            }}
                           >
-                            <Edit2 size={14} />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(item.id)}
-                            className="p-2 md:p-1 text-terracotta-500 hover:bg-terracotta-100 dark:hover:bg-charcoal-800 active:bg-terracotta-200 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    )}
-                  </>
-                )}
-              </tr>
-            ))}
+                            {item.category_label}
+                          </span>
+                        </td>
+                        <td className={`py-2 px-1 text-right font-medium text-xs md:text-sm whitespace-nowrap text-terracotta-600 dark:text-terracotta-400`}>
+                          {formatCurrency(item.amount)}
+                        </td>
+                        {!isReadOnly && (
+                          <td className="py-2 px-1">
+                            <div className="flex gap-0.5 md:gap-1 justify-end">
+                              {spendingItems.length > 1 && (
+                                <>
+                                  <SortableHandle attributes={attributes} listeners={listeners} />
+                                  <ReorderControls
+                                    index={index}
+                                    total={spendingItems.length}
+                                    onMove={handleMove}
+                                    className="mr-1"
+                                  />
+                                </>
+                              )}
+                              <button
+                                onClick={() => startEdit(item)}
+                                className="p-2 md:p-1 hover:bg-sand-200 dark:hover:bg-charcoal-800 active:bg-sand-300 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(item.id)}
+                                className="p-2 md:p-1 text-terracotta-500 hover:bg-terracotta-100 dark:hover:bg-charcoal-800 active:bg-terracotta-200 dark:active:bg-charcoal-700 transition-colors rounded touch-manipulation"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        )}
+                      </>
+                    )
+                  }
+                </SortableItem>
+              ))}
+            </SortableList>
           </tbody>
         </table>
 
