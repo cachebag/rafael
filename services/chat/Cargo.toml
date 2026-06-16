@@ -21,7 +21,7 @@ sha2 = "0.11.0"
 tool-registry = { path = "../../crates/tool-registry" }
 tokio = { version = "1.52.3", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync"] }
 tokio-stream = "0.1.18"
-tower-http = { version = "0.6.11", features = ["fs"] }
+tower-http = { version = "0.7.0", features = ["fs"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 web = { path = "../../crates/tools/web" }
