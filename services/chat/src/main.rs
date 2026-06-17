@@ -1,6 +1,7 @@
 mod auth;
 mod config;
 mod model;
+mod prompts;
 mod server;
 mod store;
 mod tools;
@@ -43,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
                 model_list_timeout_seconds = config.model_list_timeout.as_secs(),
                 model_context_max_chars = config.model_context_max_chars,
                 auth_token_days = config.auth_token_ttl.num_days(),
+                default_system_prompt_enabled = config.prompt.default_enabled(),
                 web_tools_enabled = config.tools.enabled(),
                 "configuration loaded"
             );

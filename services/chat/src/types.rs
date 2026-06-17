@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use memory::sqlite::{ConversationMemoryMode, MemoryRecord, MemorySettings, MemoryStatus};
 use serde::{Deserialize, Serialize};
 
+use crate::prompts::PromptConfig;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicUser {
@@ -92,11 +94,17 @@ pub struct PublicProvider {
     pub model: String,
     pub has_api_key: bool,
     pub system_prompt: Option<String>,
+    pub uses_default_system_prompt: bool,
     pub chat_supported: bool,
 }
 
 impl PublicProvider {
-    pub fn from_stored(provider: &StoredProvider) -> Self {
+    pub fn from_stored(provider: &StoredProvider, prompt_config: &PromptConfig) -> Self {
+        let has_provider_system_prompt = provider
+            .system_prompt
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty());
         Self {
             id: provider.id.clone(),
             name: provider.name.clone(),
@@ -108,6 +116,8 @@ impl PublicProvider {
                 .as_deref()
                 .is_some_and(|value| !value.is_empty()),
             system_prompt: provider.system_prompt.clone(),
+            uses_default_system_prompt: !has_provider_system_prompt
+                && prompt_config.default_enabled(),
             chat_supported: provider.kind.chat_supported(),
         }
     }

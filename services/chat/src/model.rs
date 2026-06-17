@@ -7,6 +7,7 @@ use client::{
 };
 use serde::Deserialize;
 
+use crate::prompts::{PromptConfig, effective_system_prompt};
 use crate::tools::ChatToolRuntime;
 use crate::types::{
     ChatMessageMetadata, ChatMessageRecord, ChatRole, ProviderKind, StoredProvider,
@@ -20,6 +21,7 @@ pub struct StreamedChatResponse {
 
 pub async fn complete_chat(
     provider: &StoredProvider,
+    prompt_config: &PromptConfig,
     messages: &[ChatMessageRecord],
     memory_context: Option<&str>,
     timeout: Duration,
@@ -29,6 +31,7 @@ pub async fn complete_chat(
         ProviderKind::OpenAiCompatible => {
             openai_compatible_chat(
                 provider,
+                prompt_config,
                 messages,
                 memory_context,
                 timeout,
@@ -44,6 +47,7 @@ pub async fn complete_chat(
 
 pub async fn stream_chat<F, G>(
     provider: &StoredProvider,
+    prompt_config: &PromptConfig,
     messages: &[ChatMessageRecord],
     memory_context: Option<&str>,
     timeout: Duration,
@@ -60,6 +64,7 @@ where
         ProviderKind::OpenAiCompatible => {
             openai_compatible_stream_chat(
                 provider,
+                prompt_config,
                 messages,
                 memory_context,
                 timeout,
@@ -118,12 +123,7 @@ pub async fn extract_memory_candidates(
         ProviderKind::OpenAiCompatible => {
             let client = LocalModelClient::new(model_client_config(provider, timeout))
                 .context("failed to create model client")?;
-            let request_messages = model_messages(
-                provider,
-                messages,
-                12_000,
-                &[MEMORY_EXTRACTION_SYSTEM_PROMPT],
-            );
+            let request_messages = memory_extraction_messages(messages);
             let response = client
                 .chat(ChatRequest::new(request_messages))
                 .await
@@ -143,6 +143,7 @@ pub async fn extract_memory_candidates(
 
 async fn openai_compatible_chat(
     provider: &StoredProvider,
+    prompt_config: &PromptConfig,
     messages: &[ChatMessageRecord],
     memory_context: Option<&str>,
     timeout: Duration,
@@ -158,6 +159,7 @@ async fn openai_compatible_chat(
         .chat(
             ChatRequest::new(model_messages(
                 provider,
+                prompt_config,
                 messages,
                 max_context_chars,
                 &extra_system_prompts,
@@ -172,6 +174,7 @@ async fn openai_compatible_chat(
 
 async fn openai_compatible_stream_chat<F, G>(
     provider: &StoredProvider,
+    prompt_config: &PromptConfig,
     messages: &[ChatMessageRecord],
     memory_context: Option<&str>,
     timeout: Duration,
@@ -187,6 +190,7 @@ where
     if let Some(tools) = tools.filter(|tools| tools.enabled()) {
         return openai_compatible_stream_chat_with_tools(
             provider,
+            prompt_config,
             messages,
             memory_context,
             timeout,
@@ -208,6 +212,7 @@ where
         .chat_stream(
             ChatRequest::new(model_messages(
                 provider,
+                prompt_config,
                 messages,
                 max_context_chars,
                 &extra_system_prompts,
@@ -225,6 +230,7 @@ where
 
 async fn openai_compatible_stream_chat_with_tools<F, G>(
     provider: &StoredProvider,
+    prompt_config: &PromptConfig,
     messages: &[ChatMessageRecord],
     memory_context: Option<&str>,
     timeout: Duration,
@@ -246,8 +252,13 @@ where
         extra_system_prompts.push(memory_context);
     }
     extra_system_prompts.push(WEB_TOOL_SYSTEM_PROMPT);
-    let mut request_messages =
-        model_messages(provider, messages, max_context_chars, &extra_system_prompts);
+    let mut request_messages = model_messages(
+        provider,
+        prompt_config,
+        messages,
+        max_context_chars,
+        &extra_system_prompts,
+    );
     let mut metadata = ChatMessageMetadata::default();
 
     for _ in 0..tools.max_invocations() {
@@ -304,24 +315,45 @@ fn model_client_config(provider: &StoredProvider, timeout: Duration) -> ModelCli
 
 fn model_messages(
     provider: &StoredProvider,
+    prompt_config: &PromptConfig,
+    messages: &[ChatMessageRecord],
+    max_context_chars: usize,
+    extra_system_prompts: &[&str],
+) -> Vec<ChatMessage> {
+    let primary_system_prompt = effective_system_prompt(provider, prompt_config);
+    model_messages_with_primary_prompt(
+        primary_system_prompt.as_deref(),
+        messages,
+        max_context_chars,
+        extra_system_prompts,
+    )
+}
+
+fn memory_extraction_messages(messages: &[ChatMessageRecord]) -> Vec<ChatMessage> {
+    model_messages_with_primary_prompt(None, messages, 12_000, &[MEMORY_EXTRACTION_SYSTEM_PROMPT])
+}
+
+fn model_messages_with_primary_prompt(
+    primary_system_prompt: Option<&str>,
     messages: &[ChatMessageRecord],
     max_context_chars: usize,
     extra_system_prompts: &[&str],
 ) -> Vec<ChatMessage> {
     let mut request_messages = Vec::new();
-    let mut remaining_chars = max_context_chars;
 
-    if let Some(system_prompt) = provider
-        .system_prompt
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
+    let reserve_chars = if primary_system_prompt.is_some() || !extra_system_prompts.is_empty() {
+        latest_message_reserve(messages, max_context_chars)
+    } else {
+        0
+    };
+    let mut system_remaining_chars = max_context_chars.saturating_sub(reserve_chars);
+
+    if let Some(system_prompt) = primary_system_prompt {
         push_budgeted_message(
             &mut request_messages,
             ChatRole::System,
             system_prompt,
-            &mut remaining_chars,
+            &mut system_remaining_chars,
         );
     }
 
@@ -330,9 +362,10 @@ fn model_messages(
             &mut request_messages,
             ChatRole::System,
             system_prompt,
-            &mut remaining_chars,
+            &mut system_remaining_chars,
         );
     }
+    let mut remaining_chars = system_remaining_chars.saturating_add(reserve_chars);
 
     let mut packed_history = Vec::new();
     for message in messages.iter().rev() {
@@ -349,6 +382,22 @@ fn model_messages(
     packed_history.reverse();
     request_messages.extend(packed_history);
     request_messages
+}
+
+fn latest_message_reserve(messages: &[ChatMessageRecord], max_context_chars: usize) -> usize {
+    if max_context_chars == 0 {
+        return 0;
+    }
+    let Some(latest_message) = messages
+        .iter()
+        .rev()
+        .map(|message| message.content.trim())
+        .find(|content| !content.is_empty())
+    else {
+        return 0;
+    };
+    let latest_chars = latest_message.chars().count();
+    latest_chars.min((max_context_chars / 2).max(1))
 }
 
 fn to_model_message(
@@ -465,11 +514,14 @@ If there is nothing worth remembering, return {\"memories\":[]}.";
 mod tests {
     use chrono::Utc;
 
+    use crate::prompts::{DEFAULT_RAFAEL_SYSTEM_PROMPT, PromptConfig};
+
     use super::*;
 
     #[test]
     fn model_messages_keeps_newest_context_within_budget() {
         let provider = test_provider();
+        let prompt_config = PromptConfig::disabled();
         let messages = vec![
             message(ChatRole::User, "old user message that should not fit"),
             message(
@@ -479,7 +531,7 @@ mod tests {
             message(ChatRole::User, "new question"),
         ];
 
-        let packed = model_messages(&provider, &messages, 20, &[]);
+        let packed = model_messages(&provider, &prompt_config, &messages, 20, &[]);
 
         assert_eq!(packed.len(), 1);
         assert_eq!(packed[0].content, "new question");
@@ -488,16 +540,107 @@ mod tests {
     #[test]
     fn model_messages_truncates_oversized_latest_message() {
         let provider = test_provider();
+        let prompt_config = PromptConfig::disabled();
         let messages = vec![message(
             ChatRole::User,
             "this one message is too large for the configured context budget",
         )];
 
-        let packed = model_messages(&provider, &messages, 32, &[]);
+        let packed = model_messages(&provider, &prompt_config, &messages, 32, &[]);
 
         assert_eq!(packed.len(), 1);
         assert!(packed[0].content.chars().count() <= 32);
         assert!(packed[0].content.starts_with("this"));
+    }
+
+    #[test]
+    fn uses_default_prompt_when_provider_prompt_absent() {
+        let provider = test_provider();
+        let prompt_config = PromptConfig::default();
+        let messages = vec![message(ChatRole::User, "new question")];
+
+        let packed = model_messages(&provider, &prompt_config, &messages, 4096, &[]);
+
+        assert_eq!(packed[0].content, DEFAULT_RAFAEL_SYSTEM_PROMPT);
+        assert_eq!(packed[1].content, "new question");
+    }
+
+    #[test]
+    fn provider_prompt_overrides_default_prompt() {
+        let mut provider = test_provider();
+        provider.system_prompt = Some("Custom".to_owned());
+        let prompt_config = PromptConfig::default();
+        let messages = vec![message(ChatRole::User, "new question")];
+
+        let packed = model_messages(&provider, &prompt_config, &messages, 4096, &[]);
+
+        assert_eq!(packed[0].content, "Custom");
+        assert_eq!(packed[1].content, "new question");
+    }
+
+    #[test]
+    fn disabled_default_prompt_sends_no_primary_system_prompt() {
+        let provider = test_provider();
+        let prompt_config = PromptConfig::disabled();
+        let messages = vec![message(ChatRole::User, "new question")];
+
+        let packed = model_messages(&provider, &prompt_config, &messages, 4096, &[]);
+
+        assert_eq!(packed.len(), 1);
+        assert_eq!(packed[0].content, "new question");
+    }
+
+    #[test]
+    fn web_prompt_still_follows_primary_prompt() {
+        let provider = test_provider();
+        let prompt_config = PromptConfig::default();
+        let messages = vec![message(ChatRole::User, "new question")];
+
+        let packed = model_messages(
+            &provider,
+            &prompt_config,
+            &messages,
+            4096,
+            &[WEB_TOOL_SYSTEM_PROMPT],
+        );
+
+        assert_eq!(packed[0].content, DEFAULT_RAFAEL_SYSTEM_PROMPT);
+        assert_eq!(packed[1].content, WEB_TOOL_SYSTEM_PROMPT);
+        assert_eq!(packed[2].content, "new question");
+    }
+
+    #[test]
+    fn memory_extraction_does_not_use_chat_prompt() {
+        let messages = vec![message(
+            ChatRole::User,
+            "remember that I like compact answers",
+        )];
+
+        let packed = memory_extraction_messages(&messages);
+
+        assert!(
+            packed[0]
+                .content
+                .starts_with("Extract durable user memories")
+        );
+        assert!(
+            !packed
+                .iter()
+                .any(|message| message.content == DEFAULT_RAFAEL_SYSTEM_PROMPT)
+        );
+        assert_eq!(packed[1].content, "remember that I like compact answers");
+    }
+
+    #[test]
+    fn oversized_system_prompt_does_not_remove_latest_message() {
+        let mut provider = test_provider();
+        provider.system_prompt = Some("system guidance ".repeat(200));
+        let prompt_config = PromptConfig::default();
+        let messages = vec![message(ChatRole::User, "latest question survives")];
+
+        let packed = model_messages(&provider, &prompt_config, &messages, 80, &[]);
+
+        assert_eq!(packed.last().unwrap().content, "latest question survives");
     }
 
     fn test_provider() -> StoredProvider {

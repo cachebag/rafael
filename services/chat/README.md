@@ -36,6 +36,7 @@ RAFAEL_CHAT_MODEL_NAME=gemma-everyday
 RAFAEL_CHAT_MODEL_API_KEY=
 RAFAEL_CHAT_MODEL_TIMEOUT_SECONDS=300
 RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS=5
+RAFAEL_CHAT_DEFAULT_SYSTEM_PROMPT=rafael
 RAFAEL_CHAT_SYSTEM_PROMPT=
 RAFAEL_CHAT_AUTH_TOKEN_DAYS=30
 RAFAEL_CHAT_WEB_SEARCH_PROVIDER=disabled
@@ -71,6 +72,13 @@ For the local llama-swap endpoint, the service reads
 `RAFAEL_CHAT_MODEL_BASE_URL/models` and uses that response as the model dropdown.
 If the endpoint is unavailable, saved providers in the authenticated user's
 `config.json` are used as a fallback.
+
+By default, chat requests include Rafael's built-in concise system prompt.
+Set `RAFAEL_CHAT_DEFAULT_SYSTEM_PROMPT=none` to disable it, or set the variable
+to literal prompt text to replace it. `RAFAEL_CHAT_SYSTEM_PROMPT` is kept as a
+provider-level override for the default provider and discovered llama-swap
+models; when it is non-empty, it replaces the built-in prompt for those
+providers.
 
 ## Web Tools
 

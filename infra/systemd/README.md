@@ -138,6 +138,8 @@ RAFAEL_CHAT_MODEL_BASE_URL=http://rafael:8080/v1
 RAFAEL_CHAT_MODEL_NAME=gemma-everyday
 RAFAEL_CHAT_MODEL_TIMEOUT_SECONDS=300
 RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS=5
+RAFAEL_CHAT_DEFAULT_SYSTEM_PROMPT=rafael
+RAFAEL_CHAT_SYSTEM_PROMPT=
 RAFAEL_CHAT_AUTH_TOKEN_DAYS=30
 RAFAEL_CHAT_WEB_SEARCH_PROVIDER=disabled
 RAFAEL_CHAT_WEB_SEARCH_FETCH_RESULTS=3
@@ -147,6 +149,11 @@ RAFAEL_CHAT_WEB_SEARCH_FETCH_MAX_BYTES=16384
 The chat backend calls `RAFAEL_CHAT_MODEL_BASE_URL/models` and uses that response
 as the local model dropdown. If the model list is unavailable, it falls back to
 saved providers in the authenticated user's chat config.
+
+`RAFAEL_CHAT_DEFAULT_SYSTEM_PROMPT=rafael` enables the built-in Rafael chat
+prompt. Set it to `none`, `off`, or `disabled` to send no default primary
+prompt. `RAFAEL_CHAT_SYSTEM_PROMPT` remains a provider override for the default
+provider and discovered llama-swap models.
 
 Chat requires login. Users register with a username, password, and allowed first
 name; allowed names are `Akrm`, `Nowar`, and `Sofia`, matched

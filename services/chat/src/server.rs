@@ -153,7 +153,10 @@ async fn get_state(
         active_provider_id(&config, &providers, &state.config.default_provider);
     let conversations = store.list_conversations().await?;
     Ok(Json(ChatStateResponse {
-        providers: providers.iter().map(PublicProvider::from_stored).collect(),
+        providers: providers
+            .iter()
+            .map(|provider| PublicProvider::from_stored(provider, &state.config.prompt))
+            .collect(),
         active_provider_id,
         theme: config.settings.theme,
         memory: memory_state(&memory_store).await?,
@@ -270,7 +273,10 @@ async fn delete_conversations(
         active_provider_id(&config, &providers, &state.config.default_provider);
 
     Ok(Json(ChatStateResponse {
-        providers: providers.iter().map(PublicProvider::from_stored).collect(),
+        providers: providers
+            .iter()
+            .map(|provider| PublicProvider::from_stored(provider, &state.config.prompt))
+            .collect(),
         active_provider_id,
         theme: config.settings.theme,
         memory: memory_state(&memory_store).await?,
@@ -429,6 +435,7 @@ async fn send_message(
 
     let response = match model::complete_chat(
         provider,
+        &state.config.prompt,
         &conversation.messages,
         memory_selection.prompt.as_deref(),
         state.config.model_timeout,
@@ -556,6 +563,7 @@ async fn stream_message_worker(
 
     let assistant_response = model::stream_chat(
         &provider,
+        &state.config.prompt,
         &conversation.messages,
         memory_selection.prompt.as_deref(),
         state.config.model_timeout,
@@ -617,7 +625,7 @@ async fn save_provider(
     let _guard = state.writes.lock().await;
     let mut config = state.chat_config(&store).await?;
     let provider = normalize_provider(request, &config)?;
-    let public = PublicProvider::from_stored(&provider);
+    let public = PublicProvider::from_stored(&provider, &state.config.prompt);
 
     match config
         .providers
@@ -681,7 +689,10 @@ async fn update_settings(
         active_provider_id(&config, &providers, &state.config.default_provider);
     let conversations = store.list_conversations().await?;
     Ok(Json(ChatStateResponse {
-        providers: providers.iter().map(PublicProvider::from_stored).collect(),
+        providers: providers
+            .iter()
+            .map(|provider| PublicProvider::from_stored(provider, &state.config.prompt))
+            .collect(),
         active_provider_id,
         theme: config.settings.theme,
         memory: memory_state(&memory_store).await?,

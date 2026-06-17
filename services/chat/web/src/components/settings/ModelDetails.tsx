@@ -15,12 +15,23 @@ export function ModelDetails({ activeProvider }: ModelDetailsProps) {
           <Detail label="Type" value={providerKindLabel(activeProvider)} />
           <Detail label="Endpoint" value={activeProvider.baseUrl} />
           <Detail label="Model ID" value={activeProvider.model} />
+          <Detail label="System prompt" value={systemPromptLabel(activeProvider)} />
         </div>
       ) : (
         <p className="text-sm text-[var(--muted)]">No model selected.</p>
       )}
     </section>
   );
+}
+
+function systemPromptLabel(provider: PublicProvider): string {
+  if (provider.systemPrompt !== undefined && provider.systemPrompt.trim() !== "") {
+    return "Provider override";
+  }
+  if (provider.usesDefaultSystemPrompt) {
+    return "Rafael default";
+  }
+  return "Disabled";
 }
 
 function providerKindLabel(provider: PublicProvider): string {

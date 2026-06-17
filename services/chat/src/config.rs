@@ -4,6 +4,7 @@ use anyhow::Context;
 use config::EnvConfig;
 use web::SearchProvider;
 
+use crate::prompts::{PromptConfig, default_system_prompt_from_env};
 use crate::tools::ChatToolsConfig;
 use crate::types::{ProviderKind, StoredProvider};
 
@@ -17,6 +18,7 @@ pub struct AppConfig {
     pub model_context_max_chars: usize,
     pub model_list_timeout: Duration,
     pub auth_token_ttl: chrono::Duration,
+    pub prompt: PromptConfig,
     pub tools: ChatToolsConfig,
 }
 
@@ -68,6 +70,11 @@ impl AppConfig {
             .context("failed to parse RAFAEL_CHAT_WEB_TOOL_MAX_INVOCATIONS")?
             .clamp(1, 8);
         let search_provider = web_search_provider(&reader)?;
+        let prompt = PromptConfig {
+            default_system_prompt: default_system_prompt_from_env(
+                reader.optional_string("RAFAEL_CHAT_DEFAULT_SYSTEM_PROMPT"),
+            ),
+        };
 
         Ok(Self {
             bind: reader
@@ -88,6 +95,7 @@ impl AppConfig {
             model_context_max_chars,
             model_list_timeout: Duration::from_secs(model_list_timeout_seconds),
             auth_token_ttl: chrono::Duration::days(auth_token_days),
+            prompt,
             tools: ChatToolsConfig {
                 search_provider,
                 search_timeout: Duration::from_secs(web_search_timeout_seconds),

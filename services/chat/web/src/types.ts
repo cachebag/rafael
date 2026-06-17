@@ -25,6 +25,7 @@ export interface PublicProvider {
   model: string;
   hasApiKey: boolean;
   systemPrompt?: string;
+  usesDefaultSystemPrompt: boolean;
   chatSupported: boolean;
 }
 

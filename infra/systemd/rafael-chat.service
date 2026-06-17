@@ -10,6 +10,8 @@
 #   Environment=RAFAEL_CHAT_MODEL_BASE_URL=http://rafael:8080/v1
 #   Environment=RAFAEL_CHAT_MODEL_NAME=gemma-everyday
 #   Environment=RAFAEL_CHAT_MODEL_LIST_TIMEOUT_SECONDS=5
+#   Environment=RAFAEL_CHAT_DEFAULT_SYSTEM_PROMPT=rafael
+#   Environment=RAFAEL_CHAT_SYSTEM_PROMPT=
 #   Environment=RAFAEL_CHAT_AUTH_TOKEN_DAYS=30
 #   Environment=RAFAEL_CHAT_WEB_SEARCH_PROVIDER=searxng
 #   Environment=RAFAEL_CHAT_SEARXNG_BASE_URL=http://127.0.0.1:8888/
