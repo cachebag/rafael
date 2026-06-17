@@ -45,6 +45,7 @@ pub async fn complete_chat(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn stream_chat<F, G>(
     provider: &StoredProvider,
     prompt_config: &PromptConfig,
@@ -172,6 +173,7 @@ async fn openai_compatible_chat(
     Ok(response.content)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn openai_compatible_stream_chat<F, G>(
     provider: &StoredProvider,
     prompt_config: &PromptConfig,
@@ -228,6 +230,7 @@ where
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn openai_compatible_stream_chat_with_tools<F, G>(
     provider: &StoredProvider,
     prompt_config: &PromptConfig,
