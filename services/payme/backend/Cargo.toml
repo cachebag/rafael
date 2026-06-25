@@ -20,7 +20,7 @@ argon2 = "0.5.3"
 jsonwebtoken = { version = "10.4.0", features = ["rust_crypto"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 printpdf = "0.9.1"
-uuid = { version = "1.23.3", features = ["v4"] }
+uuid = { version = "1.23.4", features = ["v4"] }
 dotenvy = "0.15.7"
 time = "0.3.51"
 utoipa = { version = "5.5.0", features = ["axum_extras", "chrono" ] }
