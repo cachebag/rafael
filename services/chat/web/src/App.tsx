@@ -160,6 +160,12 @@ export default function App() {
       };
     }
 
+    if (conversation?.id === selectedConversationId) {
+      return () => {
+        active = false;
+      };
+    }
+
     getConversation(selectedConversationId)
       .then((nextConversation) => {
         if (active) {
@@ -175,7 +181,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [selectedConversationId]);
+  }, [conversation?.id, selectedConversationId]);
 
   async function handleNewConversation(): Promise<void> {
     setBusy(true);
