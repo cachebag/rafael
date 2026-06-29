@@ -591,6 +591,7 @@ const ROOT_MANIFESTS: &[&str] = &[
     "Cargo.toml",
     "Cargo.lock",
     "package.json",
+    "bun.lock",
     "package-lock.json",
     "pnpm-lock.yaml",
     "yarn.lock",

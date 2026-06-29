@@ -142,7 +142,7 @@ based on detected project type:
   `cargo test --workspace --all-features`
 - Rust package: `cargo fmt --all -- --check`, then `cargo test --all-features`
 - Go: `go test ./...`
-- Node: `npm test`
+- Node: `bun test`
 - Python: `python -m pytest`
 
 Verification commands are parsed directly, not run through a shell. Shell

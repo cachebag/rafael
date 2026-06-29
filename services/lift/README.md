@@ -6,8 +6,8 @@ Minimal workout journal for Rafael.
 
 ```bash
 cd services/lift/frontend
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 In another shell:

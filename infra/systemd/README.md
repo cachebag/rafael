@@ -195,7 +195,7 @@ Build the frontend and release binary before starting the unit:
 
 ```bash
 cd ~/rafael/services/chat/web
-npm run build
+bun run build
 
 cd ~/rafael
 cargo build --release -p chat
@@ -251,7 +251,7 @@ Build the frontend and release binary before starting the unit:
 
 ```bash
 cd ~/rafael/services/payme/frontend
-npm run build
+bun run build
 
 cd ~/rafael
 cargo build --release -p payme
@@ -289,7 +289,7 @@ Build the frontend and release binary before starting the unit:
 
 ```bash
 cd ~/rafael/services/lift/frontend
-npm run build
+bun run build
 
 cd ~/rafael
 cargo build --release -p lift

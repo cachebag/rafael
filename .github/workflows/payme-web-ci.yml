@@ -18,17 +18,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: services/payme/frontend/package-lock.json
+          bun-version: 1.3.11
 
-      - run: npm ci
+      - run: bun install --frozen-lockfile
         working-directory: services/payme/frontend
 
-      - run: npm run lint
+      - run: bun run lint
         working-directory: services/payme/frontend
 
-      - run: npm run build
+      - run: bun run build
         working-directory: services/payme/frontend
