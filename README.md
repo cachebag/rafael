@@ -54,14 +54,14 @@ Tailscale Funnel exposes the local web services publicly:
 
 ```txt
 https://rafael.taild0efc0.ts.net/       -> rafael chat
-https://rafael.taild0efc0.ts.net/lift/  -> lift
 https://rafael.taild0efc0.ts.net:8443/  -> payme
+https://rafael.taild0efc0.ts.net:8444/  -> lift
 ```
 
-Lift is mounted onto the existing 443 Funnel host:
+Lift uses its own Funnel port like Payme:
 
 ```bash
-tailscale funnel --bg --https=443 --set-path=/lift http://127.0.0.1:3033
+tailscale funnel --bg --https=8444 http://127.0.0.1:3033
 ```
 
 ## Local Model

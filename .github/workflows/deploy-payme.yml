@@ -33,11 +33,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-payme-
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: services/payme/frontend/package-lock.json
+      - name: install bun
+        run: |
+          set -euo pipefail
+          BUN_VERSION=1.3.11
+          BUN_BIN="$HOME/.bun/bin/bun"
+          if [ ! -x "$BUN_BIN" ] || [ "$("$BUN_BIN" --version)" != "$BUN_VERSION" ]; then
+            mkdir -p "$HOME/.bun/bin" "$RUNNER_TEMP/bun"
+            curl -fsSL -o "$RUNNER_TEMP/bun/bun.zip" "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip"
+            python3 -m zipfile -e "$RUNNER_TEMP/bun/bun.zip" "$RUNNER_TEMP/bun"
+            cp "$RUNNER_TEMP/bun/bun-linux-x64/bun" "$BUN_BIN"
+            chmod +x "$BUN_BIN"
+          fi
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
 
       - name: deploy payme on rafael
         run: |
@@ -53,8 +61,8 @@ jobs:
           git reset --hard origin/master
 
           cd services/payme/frontend
-          npm ci
-          npm run build
+          bun install --frozen-lockfile
+          bun run build
 
           cd "$REPO"
           cargo build --release -p payme

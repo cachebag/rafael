@@ -6,8 +6,8 @@ A very simple chat interface for local and OpenAI-compatible model endpoints.
 
 ```sh
 cd services/chat/web
-npm install
-npm run build
+bun install
+bun run build
 ```
 
 ```sh
@@ -20,7 +20,7 @@ For frontend development:
 ```sh
 cargo run -p chat -- serve
 cd services/chat/web
-npm run dev
+bun run dev
 ```
 
 The Vite dev server proxies `/api` to `http://127.0.0.1:3031`.

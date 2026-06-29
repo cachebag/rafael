@@ -6,8 +6,8 @@ Minimal workout journal for Rafael.
 
 ```bash
 cd services/lift/frontend
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 In another shell:
@@ -28,8 +28,8 @@ The deploy workflow builds `services/lift/frontend`, builds the `lift` release
 binary, installs `infra/systemd/rafael-lift.service`, and checks
 `http://127.0.0.1:3033/health`.
 
-Public access is intended to share the existing Rafael Funnel host:
+Public access uses its own Rafael Funnel port:
 
 ```bash
-tailscale funnel --bg --https=443 --set-path=/lift http://127.0.0.1:3033
+tailscale funnel --bg --https=8444 http://127.0.0.1:3033
 ```

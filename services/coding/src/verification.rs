@@ -454,7 +454,7 @@ fn fallback_commands(repo_context: &RepoContext) -> Vec<String> {
     } else if has_project_kind(repo_context, "go") {
         commands.push("go test ./...".to_owned());
     } else if has_project_kind(repo_context, "node") {
-        commands.push("npm test".to_owned());
+        commands.push("bun test".to_owned());
     } else if has_project_kind(repo_context, "python") {
         commands.push("python -m pytest".to_owned());
     }

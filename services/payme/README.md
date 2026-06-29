@@ -25,7 +25,7 @@ Generally, if you don't like it, fork it and make it your own or consider contri
 ## Requirements
 
 - Rust 1.75+
-- Node.js 20+
+- Bun 1.3+
 - SQLite3
 
 ## Setup
@@ -85,8 +85,8 @@ printf 'JWT_SECRET=%s\n' "$(openssl rand -base64 32)" > ~/rafael/data/payme/paym
 chmod 600 ~/rafael/data/payme/payme.env
 
 cd ~/rafael/services/payme/frontend
-npm ci
-npm run build
+bun install --frozen-lockfile
+bun run build
 
 cd ~/rafael
 cargo build --release -p payme

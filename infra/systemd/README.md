@@ -195,7 +195,7 @@ Build the frontend and release binary before starting the unit:
 
 ```bash
 cd ~/rafael/services/chat/web
-npm run build
+bun run build
 
 cd ~/rafael
 cargo build --release -p chat
@@ -251,7 +251,7 @@ Build the frontend and release binary before starting the unit:
 
 ```bash
 cd ~/rafael/services/payme/frontend
-npm run build
+bun run build
 
 cd ~/rafael
 cargo build --release -p payme
@@ -289,7 +289,7 @@ Build the frontend and release binary before starting the unit:
 
 ```bash
 cd ~/rafael/services/lift/frontend
-npm run build
+bun run build
 
 cd ~/rafael
 cargo build --release -p lift
@@ -307,16 +307,16 @@ Confirm Lift is answering:
 curl http://127.0.0.1:3033/health
 ```
 
-Mount Lift onto the existing public Funnel host:
+Expose Lift on its own public Funnel port:
 
 ```bash
-tailscale funnel --bg --https=443 --set-path=/lift http://127.0.0.1:3033
+tailscale funnel --bg --https=8444 http://127.0.0.1:3033
 ```
 
 Public Funnel endpoint:
 
 ```txt
-https://rafael.taild0efc0.ts.net/lift/
+https://rafael.taild0efc0.ts.net:8444/
 ```
 
 ## llama-server.service
