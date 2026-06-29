@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   Check,
+  ChevronDown,
   Dumbbell,
   LineChart,
   Moon,
@@ -23,6 +24,11 @@ import { loadState, saveState } from "./api";
 import { DayKey, EntrySet, Exercise, JournalEntry, LiftState, Workout } from "./types";
 
 type View = "journal" | "plan" | "progress";
+
+interface SelectOption {
+  value: string;
+  label: string;
+}
 
 const dayKeys: DayKey[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const dayLabels: Record<DayKey, string> = {
@@ -197,6 +203,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [showSaveNotice, setShowSaveNotice] = useState(false);
   const [dark, setDark] = useState(() => localStorage.getItem("lift-theme") === "dark");
 
   useEffect(() => {
@@ -235,12 +242,20 @@ export function App() {
         .then(() => {
           setDirty(false);
           setSaving("saved");
+          setShowSaveNotice(true);
         })
         .catch(() => setSaving("error"));
     }, 650);
 
     return () => window.clearTimeout(timeout);
   }, [dirty, loading, state]);
+
+  useEffect(() => {
+    if (!showSaveNotice) return;
+
+    const timeout = window.setTimeout(() => setShowSaveNotice(false), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [showSaveNotice]);
 
   const dateWindow = useMemo(
     () => Array.from({ length: 14 }, (_, index) => addDays(today, index - 6)),
@@ -251,6 +266,26 @@ export function App() {
   const selectedWorkout = state.workouts.find((item) => item.id === selectedWorkoutId) ?? state.workouts[0] ?? null;
   const allExercises = state.workouts.flatMap((item) =>
     item.exercises.map((exercise) => ({ workout: item.name, exercise }))
+  );
+  const workoutOptions = useMemo<SelectOption[]>(
+    () => [
+      { value: "", label: "Rest" },
+      ...state.workouts.map((workoutItem, index) => ({
+        value: workoutItem.id,
+        label: workoutItem.name.trim() || `Workout ${index + 1}`
+      }))
+    ],
+    [state.workouts]
+  );
+  const metricOptions = useMemo<SelectOption[]>(
+    () => [
+      { value: "bodyWeight", label: "Body weight" },
+      ...allExercises.map(({ workout: workoutName, exercise }, index) => ({
+        value: exercise.id,
+        label: `${workoutName.trim() || "Workout"} / ${exercise.name.trim() || `Exercise ${index + 1}`}`
+      }))
+    ],
+    [allExercises]
   );
   const chartData = useMemo(() => {
     return Object.values(state.entries)
@@ -308,8 +343,8 @@ export function App() {
   function addWorkout() {
     const workout: Workout = {
       id: id(),
-      name: "New workout",
-      exercises: [{ id: id(), name: "Exercise", sets: 3, reps: 8 }]
+      name: "",
+      exercises: [{ id: id(), name: "", sets: 3, reps: 8 }]
     };
     commit({ ...state, workouts: [...state.workouts, workout] });
     setSelectedWorkoutId(workout.id);
@@ -359,7 +394,7 @@ export function App() {
               ...workout,
               exercises: [
                 ...workout.exercises,
-                { id: id(), name: "Exercise", sets: 3, reps: 8 }
+                { id: id(), name: "", sets: 3, reps: 8 }
               ]
             }
           : workout
@@ -439,7 +474,7 @@ export function App() {
                 <section className="day-summary">
                   <div>
                     <p className="eyebrow">{displayDate(selectedDate)}</p>
-                    <h1>{workout?.name ?? "Rest day"}</h1>
+                    <h1>{workout?.name.trim() || "Rest day"}</h1>
                   </div>
                   <label className="compact-field">
                     <span>Weight</span>
@@ -449,7 +484,7 @@ export function App() {
                       onChange={(event) =>
                         updateEntry((current) => ({ ...current, bodyWeight: event.target.value }))
                       }
-                      placeholder="optional"
+                      placeholder="lbs"
                     />
                   </label>
                 </section>
@@ -463,7 +498,7 @@ export function App() {
                         <section className="exercise-block" key={exercise.id}>
                           <div className="exercise-head">
                             <div>
-                              <h2>{exercise.name}</h2>
+                              <h2>{exercise.name.trim() || "Untitled exercise"}</h2>
                               <p>{exercise.sets} x {exercise.reps}</p>
                             </div>
                           </div>
@@ -479,12 +514,14 @@ export function App() {
                                   inputMode="decimal"
                                   value={set.weight}
                                   onChange={(event) => updateSet(exercise.id, index, { weight: event.target.value })}
+                                  placeholder="lbs"
                                   aria-label={`${exercise.name} set ${index + 1} weight`}
                                 />
                                 <input
                                   inputMode="numeric"
                                   value={set.reps}
                                   onChange={(event) => updateSet(exercise.id, index, { reps: event.target.value })}
+                                  placeholder="0"
                                   aria-label={`${exercise.name} set ${index + 1} reps`}
                                 />
                                 <button
@@ -512,6 +549,7 @@ export function App() {
                     onChange={(event) =>
                       updateEntry((current) => ({ ...current, notes: event.target.value }))
                     }
+                    placeholder="Notes"
                   />
                 </label>
               </section>
@@ -521,28 +559,22 @@ export function App() {
               <section className="view plan-view">
                 <section className="schedule-grid">
                   {dayKeys.map((day) => (
-                    <label className="schedule-item" key={day}>
+                    <div className="schedule-item" key={day}>
                       <span>{dayLabels[day]}</span>
-                      <select
+                      <CustomSelect
                         value={state.schedule[day] ?? ""}
+                        options={workoutOptions}
                         onChange={(event) =>
                           commit({
                             ...state,
                             schedule: {
                               ...state.schedule,
-                              [day]: event.target.value || null
+                              [day]: event || null
                             }
                           })
                         }
-                      >
-                        <option value="">Rest</option>
-                        {state.workouts.map((workoutItem) => (
-                          <option key={workoutItem.id} value={workoutItem.id}>
-                            {workoutItem.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      />
+                    </div>
                   ))}
                 </section>
 
@@ -554,7 +586,7 @@ export function App() {
                         className={workoutItem.id === selectedWorkout?.id ? "active" : ""}
                         onClick={() => setSelectedWorkoutId(workoutItem.id)}
                       >
-                        {workoutItem.name}
+                        {workoutItem.name.trim() || "Untitled"}
                       </button>
                     ))}
                     <button onClick={addWorkout}>
@@ -570,6 +602,7 @@ export function App() {
                           onChange={(event) =>
                             updateWorkout(selectedWorkout.id, { name: event.target.value })
                           }
+                          placeholder="Workout name"
                         />
                         <button
                           className="icon-danger"
@@ -590,28 +623,29 @@ export function App() {
                                   name: event.target.value
                                 })
                               }
+                              placeholder="Exercise"
                               aria-label="Exercise name"
                             />
                             <input
-                              type="number"
-                              min="1"
+                              inputMode="numeric"
                               value={exercise.sets}
                               onChange={(event) =>
                                 updateExercise(selectedWorkout.id, exercise.id, {
                                   sets: Math.max(1, Number(event.target.value) || 1)
                                 })
                               }
+                              placeholder="Sets"
                               aria-label="Sets"
                             />
                             <input
-                              type="number"
-                              min="1"
+                              inputMode="numeric"
                               value={exercise.reps}
                               onChange={(event) =>
                                 updateExercise(selectedWorkout.id, exercise.id, {
                                   reps: Math.max(1, Number(event.target.value) || 1)
                                 })
                               }
+                              placeholder="Reps"
                               aria-label="Reps"
                             />
                             <button
@@ -638,14 +672,7 @@ export function App() {
             {view === "progress" && (
               <section className="view progress-view">
                 <div className="progress-controls">
-                  <select value={metric} onChange={(event) => setMetric(event.target.value)}>
-                    <option value="bodyWeight">Body weight</option>
-                    {allExercises.map(({ workout: workoutName, exercise }) => (
-                      <option key={exercise.id} value={exercise.id}>
-                        {workoutName} / {exercise.name}
-                      </option>
-                    ))}
-                  </select>
+                  <CustomSelect value={metric} options={metricOptions} onChange={setMetric} />
                 </div>
 
                 <div className="chart-wrap">
@@ -675,6 +702,10 @@ export function App() {
           </>
         )}
       </main>
+      <div className={`save-toast ${showSaveNotice ? "visible" : ""}`} role="status" aria-live="polite">
+        <Check size={15} />
+        <span>Saved</span>
+      </div>
     </div>
   );
 }
@@ -699,5 +730,53 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+function CustomSelect({
+  value,
+  options,
+  onChange
+}: {
+  value: string;
+  options: SelectOption[];
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.value === value) ?? options[0];
+
+  return (
+    <div className={`custom-select ${open ? "open" : ""}`} onBlur={() => window.setTimeout(() => setOpen(false), 120)}>
+      <button
+        type="button"
+        className="custom-select-trigger"
+        onClick={() => setOpen((current) => !current)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span>{selected?.label ?? "Select"}</span>
+        <ChevronDown size={15} />
+      </button>
+      {open && (
+        <div className="custom-select-menu" role="listbox">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={option.value === value ? "selected" : ""}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+              role="option"
+              aria-selected={option.value === value}
+            >
+              <span>{option.label}</span>
+              {option.value === value && <Check size={14} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
