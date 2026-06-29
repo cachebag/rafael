@@ -25,6 +25,7 @@ export interface ExerciseEntry {
 
 export interface JournalEntry {
   date: string;
+  workoutId?: string | null;
   bodyWeight: string;
   notes: string;
   exercises: Record<string, ExerciseEntry>;

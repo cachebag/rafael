@@ -224,6 +224,7 @@ input {
 }
 
 .day-summary,
+.day-override,
 .exercise-block,
 .notes-field,
 .schedule-item,
@@ -241,6 +242,29 @@ input {
   justify-content: space-between;
   gap: 12px;
   padding: 16px;
+}
+
+.day-override {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+}
+
+.day-override > div {
+  display: grid;
+  gap: 3px;
+}
+
+.day-override span {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.day-override p {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .eyebrow {

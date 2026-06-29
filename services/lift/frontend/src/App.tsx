@@ -141,7 +141,8 @@ function displayDate(value: string) {
 }
 
 function getWorkout(state: LiftState, date: string) {
-  const workoutId = state.schedule[dayKeyForDate(date)];
+  const entry = state.entries[date];
+  const workoutId = entry?.workoutId === undefined ? state.schedule[dayKeyForDate(date)] : entry.workoutId;
   return state.workouts.find((workout) => workout.id === workoutId) ?? null;
 }
 
@@ -277,6 +278,16 @@ export function App() {
     ],
     [state.workouts]
   );
+  const journalWorkoutOptions = useMemo<SelectOption[]>(
+    () => [
+      {
+        value: "__schedule__",
+        label: `Plan: ${getWorkout({ ...state, entries: { ...state.entries, [selectedDate]: { ...entry, workoutId: undefined } } }, selectedDate)?.name.trim() || "Rest"}`
+      },
+      ...workoutOptions
+    ],
+    [entry, selectedDate, state, workoutOptions]
+  );
   const metricOptions = useMemo<SelectOption[]>(
     () => [
       { value: "bodyWeight", label: "Body weight" },
@@ -340,6 +351,25 @@ export function App() {
     });
   }
 
+  function updateEntryWorkout(value: string) {
+    updateEntry((current) => {
+      const nextWorkoutId = value === "__schedule__" ? undefined : value || null;
+      const nextWorkout = nextWorkoutId === undefined
+        ? state.workouts.find((workoutItem) => workoutItem.id === state.schedule[dayKeyForDate(selectedDate)]) ?? null
+        : state.workouts.find((workoutItem) => workoutItem.id === nextWorkoutId) ?? null;
+      const nextExerciseIds = new Set(nextWorkout?.exercises.map((exercise) => exercise.id) ?? []);
+      const exercises = Object.fromEntries(
+        Object.entries(current.exercises).filter(([exerciseId]) => nextExerciseIds.has(exerciseId))
+      );
+
+      return {
+        ...current,
+        workoutId: nextWorkoutId,
+        exercises
+      };
+    });
+  }
+
   function addWorkout() {
     const workout: Workout = {
       id: id(),
@@ -362,10 +392,16 @@ export function App() {
   function deleteWorkout(workoutId: string) {
     const workouts = state.workouts.filter((workout) => workout.id !== workoutId);
     const schedule = { ...state.schedule };
+    const entries = Object.fromEntries(
+      Object.entries(state.entries).map(([date, journalEntry]) => [
+        date,
+        journalEntry.workoutId === workoutId ? { ...journalEntry, workoutId: undefined } : journalEntry
+      ])
+    );
     for (const day of dayKeys) {
       if (schedule[day] === workoutId) schedule[day] = null;
     }
-    commit({ ...state, workouts, schedule });
+    commit({ ...state, workouts, schedule, entries });
     setSelectedWorkoutId(workouts[0]?.id ?? null);
   }
 
@@ -487,6 +523,18 @@ export function App() {
                       placeholder="lbs"
                     />
                   </label>
+                </section>
+
+                <section className="day-override">
+                  <div>
+                    <span>Workout</span>
+                    <p>{entry.workoutId === undefined ? "Using weekly plan" : "Only for this day"}</p>
+                  </div>
+                  <CustomSelect
+                    value={entry.workoutId === undefined ? "__schedule__" : entry.workoutId ?? ""}
+                    options={journalWorkoutOptions}
+                    onChange={updateEntryWorkout}
+                  />
                 </section>
 
                 {workout ? (
