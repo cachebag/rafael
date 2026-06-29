@@ -310,13 +310,13 @@ curl http://127.0.0.1:3033/health
 Expose Lift on its own public Funnel port:
 
 ```bash
-tailscale funnel --bg --https=8444 http://127.0.0.1:3033
+tailscale funnel --bg --https=10000 http://127.0.0.1:3033
 ```
 
 Public Funnel endpoint:
 
 ```txt
-https://rafael.taild0efc0.ts.net:8444/
+https://rafael.taild0efc0.ts.net:10000/
 ```
 
 ## llama-server.service

@@ -31,5 +31,5 @@ binary, installs `infra/systemd/rafael-lift.service`, and checks
 Public access uses its own Rafael Funnel port:
 
 ```bash
-tailscale funnel --bg --https=8444 http://127.0.0.1:3033
+tailscale funnel --bg --https=10000 http://127.0.0.1:3033
 ```

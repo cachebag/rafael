@@ -73,13 +73,25 @@ jobs:
           systemctl --user restart rafael-lift
           systemctl --user is-active rafael-lift
 
+          ready=0
           for attempt in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:3033/health >/dev/null; then
-              exit 0
+              ready=1
+              break
             fi
             sleep 1
           done
 
-          echo "lift service did not become ready on port 3033"
-          journalctl --user -u rafael-lift -n 20 --no-pager
-          exit 1
+          if [ "$ready" != "1" ]; then
+            echo "lift service did not become ready on port 3033"
+            journalctl --user -u rafael-lift -n 20 --no-pager
+            exit 1
+          fi
+
+          tailscale funnel --https=8444 off || true
+
+          if ! tailscale funnel --bg --https=10000 http://127.0.0.1:3033; then
+            printf '%s\n' "${{ secrets.RUNNER_PASSWORD }}" | sudo -S -p '' tailscale set --operator="$(id -un)"
+            tailscale funnel --https=8444 off || true
+            tailscale funnel --bg --https=10000 http://127.0.0.1:3033
+          fi
