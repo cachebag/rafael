@@ -1,0 +1,77 @@
+name: deploy lift
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "services/lift/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "infra/systemd/rafael-lift.service"
+      - ".github/workflows/deploy-lift.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-rafael
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-lift-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-lift-
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: services/lift/frontend/package-lock.json
+
+      - name: deploy lift on rafael
+        run: |
+          set -euo pipefail
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+          export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+
+          REPO="$HOME/rafael"
+          cd "$REPO"
+
+          git fetch origin master
+          git reset --hard origin/master
+
+          cd services/lift/frontend
+          npm ci
+          npm run build
+
+          cd "$REPO"
+          cargo build --release -p lift
+
+          mkdir -p "$HOME/.config/systemd/user"
+          ln -sf "$REPO/infra/systemd/rafael-lift.service" "$HOME/.config/systemd/user/rafael-lift.service"
+          systemctl --user daemon-reload
+          systemctl --user restart rafael-lift
+          systemctl --user is-active rafael-lift
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3033/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "lift service did not become ready on port 3033"
+          journalctl --user -u rafael-lift -n 20 --no-pager
+          exit 1

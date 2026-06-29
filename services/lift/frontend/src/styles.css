@@ -1,0 +1,494 @@
+:root {
+  --background: #f1f1ef;
+  --surface: #f7f7f5;
+  --surface-soft: #ededeb;
+  --surface-strong: #dededa;
+  --text: #202020;
+  --text-muted: #6d6860;
+  --border: #c9c7c0;
+  --accent: #5f7d69;
+  --accent-strong: #476652;
+  --danger: #a9605a;
+  --line-muted: #d2cdc5;
+  color: var(--text);
+  background: var(--background);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body.dark {
+  --background: #101010;
+  --surface: #181818;
+  --surface-soft: #202020;
+  --surface-strong: #343434;
+  --text: #e8e3da;
+  --text-muted: #9c968d;
+  --border: #343434;
+  --accent: #8fb89a;
+  --accent-strong: #b0d4b8;
+  --danger: #d78779;
+  --line-muted: #343434;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100dvh;
+  background: var(--background);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+
+.app-shell {
+  min-height: 100dvh;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--background) 92%, transparent);
+  padding: 10px 12px;
+  backdrop-filter: blur(18px);
+}
+
+.brand {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.icon-button,
+.check-button,
+.icon-danger {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.icon-button:hover,
+.icon-button.active,
+.check-button.active {
+  border-color: var(--border);
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+.icon-danger {
+  color: var(--danger);
+}
+
+.icon-danger:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.main {
+  width: min(100%, 980px);
+  margin: 0 auto;
+  padding: 12px;
+}
+
+.status-row {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.view {
+  display: grid;
+  gap: 14px;
+}
+
+.date-rail {
+  display: grid;
+  grid-auto-columns: minmax(54px, 1fr);
+  grid-auto-flow: column;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+
+.date-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.date-pill {
+  position: relative;
+  display: grid;
+  min-height: 68px;
+  min-width: 54px;
+  gap: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-muted);
+  padding: 9px 6px;
+  text-align: center;
+}
+
+.date-pill span {
+  font-size: 11px;
+}
+
+.date-pill strong {
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.date-pill i {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--accent);
+}
+
+.date-pill.active {
+  border-color: var(--accent);
+}
+
+.day-summary,
+.exercise-block,
+.notes-field,
+.schedule-item,
+.editor-panel,
+.chart-wrap,
+.empty-state {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.day-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(26px, 8vw, 42px);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+h2 {
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.compact-field {
+  display: grid;
+  width: min(136px, 38vw);
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.compact-field input {
+  width: 100%;
+  padding: 10px;
+  font-size: 16px;
+}
+
+.exercise-list {
+  display: grid;
+  gap: 12px;
+}
+
+.exercise-block {
+  overflow: hidden;
+}
+
+.exercise-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px;
+}
+
+.exercise-head p {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.set-grid {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) minmax(0, 0.7fr) 52px;
+  gap: 1px;
+  border-top: 1px solid var(--border);
+  background: var(--border);
+}
+
+.set-grid > span {
+  background: var(--surface-soft);
+  color: var(--text-muted);
+  padding: 9px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.set-row {
+  display: contents;
+}
+
+.set-row strong,
+.set-row input,
+.set-row button {
+  min-height: 48px;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+}
+
+.set-row strong {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.set-row input {
+  width: 100%;
+  padding: 0 10px;
+  font-size: 16px;
+}
+
+.set-row .check-button {
+  width: 100%;
+  height: 100%;
+}
+
+.notes-field {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.notes-field textarea {
+  min-height: 92px;
+  resize: vertical;
+  padding: 12px;
+  font-size: 15px;
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.schedule-item {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.schedule-item span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.schedule-item select,
+.progress-controls select {
+  width: 100%;
+  padding: 10px;
+}
+
+.workout-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.workout-list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.workout-list button,
+.secondary-action {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 12px;
+}
+
+.workout-list button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.editor-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.editor-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 8px;
+}
+
+.editor-title input {
+  width: 100%;
+  padding: 11px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.exercise-editor-list {
+  display: grid;
+  gap: 8px;
+}
+
+.exercise-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px 64px 42px;
+  gap: 8px;
+}
+
+.exercise-editor input {
+  width: 100%;
+  padding: 10px;
+}
+
+.secondary-action {
+  width: fit-content;
+}
+
+.progress-controls {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.progress-controls select {
+  max-width: 320px;
+}
+
+.chart-wrap {
+  height: min(58vh, 420px);
+  min-height: 300px;
+  padding: 12px;
+}
+
+.empty-state {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  color: var(--text-muted);
+  padding: 24px;
+  text-align: center;
+}
+
+@media (min-width: 720px) {
+  .topbar {
+    padding: 12px 20px;
+  }
+
+  .main {
+    padding: 18px 20px 32px;
+  }
+
+  .schedule-grid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  .workout-editor {
+    grid-template-columns: 200px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .workout-list {
+    display: grid;
+    overflow: visible;
+  }
+}

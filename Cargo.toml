@@ -19,5 +19,6 @@ members = [
   "services/automation",
   "services/health",
   "services/homelab",
+  "services/lift/backend",
   "services/payme/backend",
 ]

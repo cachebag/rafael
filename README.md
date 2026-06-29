@@ -13,6 +13,9 @@
   <a href="https://github.com/cachebag/rafael/actions/workflows/deploy-payme.yml">
     <img alt="deploy payme" src="https://github.com/cachebag/rafael/actions/workflows/deploy-payme.yml/badge.svg?branch=master">
   </a>
+  <a href="https://github.com/cachebag/rafael/actions/workflows/deploy-lift.yml">
+    <img alt="deploy lift" src="https://github.com/cachebag/rafael/actions/workflows/deploy-lift.yml/badge.svg?branch=master">
+  </a>
 </p>
 
 rafael is both my workstation and the name for this monorepo with all the various services, crates and configuration files that power my homelab.
@@ -37,11 +40,13 @@ The active pieces right now are:
 - `services/coding`: the GitHub App coding worker.
 - `services/chat`: the local model chat interface.
 - `services/payme`: the personal finance tracker.
+- `services/lift`: the workout journal.
 - `infra/docker/searxng`: the local SearXNG search backend for chat web search.
 - `infra/systemd/llama-swap.service`: the user systemd service for the local
   model lifecycle proxy.
 - `infra/systemd/rafael-chat.service`: the user systemd service for the chat UI.
 - `infra/systemd/rafael-payme.service`: the user systemd service for Payme.
+- `infra/systemd/rafael-lift.service`: the user systemd service for Lift.
 
 ## Public Services
 
@@ -49,7 +54,14 @@ Tailscale Funnel exposes the local web services publicly:
 
 ```txt
 https://rafael.taild0efc0.ts.net/       -> rafael chat
+https://rafael.taild0efc0.ts.net/lift/  -> lift
 https://rafael.taild0efc0.ts.net:8443/  -> payme
+```
+
+Lift is mounted onto the existing 443 Funnel host:
+
+```bash
+tailscale funnel --bg --https=443 --set-path=/lift http://127.0.0.1:3033
 ```
 
 ## Local Model

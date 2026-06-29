@@ -58,6 +58,7 @@ Install the units into the user systemd directory:
 mkdir -p ~/.config/systemd/user
 ln -sf ~/rafael/infra/systemd/llama-swap.service ~/.config/systemd/user/llama-swap.service
 ln -sf ~/rafael/infra/systemd/rafael-chat.service ~/.config/systemd/user/rafael-chat.service
+ln -sf ~/rafael/infra/systemd/rafael-lift.service ~/.config/systemd/user/rafael-lift.service
 systemctl --user daemon-reload
 ```
 
@@ -67,6 +68,7 @@ Stop the legacy direct server before enabling the proxy:
 systemctl --user disable --now llama-server.service
 systemctl --user enable --now llama-swap.service
 systemctl --user restart rafael-chat.service
+systemctl --user restart rafael-lift.service
 ```
 
 After changing `llama-swap.yaml`, restart the proxy:
@@ -271,6 +273,50 @@ Public Funnel endpoint:
 
 ```txt
 https://rafael.taild0efc0.ts.net:8443/
+```
+
+## rafael-lift.service
+
+The checked-in unit serves Lift from this repo:
+
+```ini
+DATABASE_URL=sqlite:%h/rafael/data/lift/lift.db?mode=rwc
+LIFT_STATIC_DIR=%h/rafael/services/lift/frontend/dist
+LIFT_BIND=127.0.0.1:3033
+```
+
+Build the frontend and release binary before starting the unit:
+
+```bash
+cd ~/rafael/services/lift/frontend
+npm run build
+
+cd ~/rafael
+cargo build --release -p lift
+```
+
+Check whether the unit is running:
+
+```bash
+systemctl --user status rafael-lift
+```
+
+Confirm Lift is answering:
+
+```bash
+curl http://127.0.0.1:3033/health
+```
+
+Mount Lift onto the existing public Funnel host:
+
+```bash
+tailscale funnel --bg --https=443 --set-path=/lift http://127.0.0.1:3033
+```
+
+Public Funnel endpoint:
+
+```txt
+https://rafael.taild0efc0.ts.net/lift/
 ```
 
 ## llama-server.service
