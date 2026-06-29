@@ -21,9 +21,10 @@ import {
   YAxis
 } from "recharts";
 import { loadState, saveState } from "./api";
-import { DayKey, EntrySet, Exercise, JournalEntry, LiftState, Workout } from "./types";
+import { DayKey, EntrySet, Exercise, JournalEntry, LiftState, Workout, WorkoutSnapshot } from "./types";
 
 type View = "journal" | "plan" | "progress";
+type DisplayWorkout = Workout | WorkoutSnapshot;
 
 interface SelectOption {
   value: string;
@@ -140,10 +141,32 @@ function displayDate(value: string) {
   }).format(parseDate(value));
 }
 
-function getWorkout(state: LiftState, date: string) {
+function snapshotWorkout(workout: Workout): WorkoutSnapshot {
+  return {
+    id: workout.id,
+    name: workout.name,
+    exercises: workout.exercises.map((exercise) => ({ ...exercise }))
+  };
+}
+
+function getLiveWorkout(state: LiftState, date: string) {
   const entry = state.entries[date];
   const workoutId = entry?.workoutId === undefined ? state.schedule[dayKeyForDate(date)] : entry.workoutId;
   return state.workouts.find((workout) => workout.id === workoutId) ?? null;
+}
+
+function getPlannedWorkout(state: LiftState, date: string) {
+  const workoutId = state.schedule[dayKeyForDate(date)];
+  return state.workouts.find((workout) => workout.id === workoutId) ?? null;
+}
+
+function getWorkout(state: LiftState, date: string): DisplayWorkout | null {
+  const entry = state.entries[date];
+  if (entry?.workoutSnapshot) {
+    return entry.workoutSnapshot;
+  }
+
+  return getLiveWorkout(state, date);
 }
 
 function emptySets(exercise: Exercise): EntrySet[] {
@@ -161,7 +184,8 @@ function ensureEntry(state: LiftState, date: string): JournalEntry {
     notes: "",
     exercises: {}
   };
-  const workout = getWorkout(state, date);
+  const liveWorkout = getLiveWorkout(state, date);
+  const workout = existing.workoutSnapshot ?? (liveWorkout ? snapshotWorkout(liveWorkout) : null);
 
   if (!workout) {
     return existing;
@@ -169,6 +193,7 @@ function ensureEntry(state: LiftState, date: string): JournalEntry {
 
   return {
     ...existing,
+    workoutSnapshot: existing.workoutSnapshot ?? workout,
     exercises: workout.exercises.reduce<Record<string, { sets: EntrySet[] }>>((acc, exercise) => {
       acc[exercise.id] = existing.exercises[exercise.id] ?? { sets: emptySets(exercise) };
       return acc;
@@ -176,7 +201,7 @@ function ensureEntry(state: LiftState, date: string): JournalEntry {
   };
 }
 
-function entryCompletion(entry: JournalEntry, workout: Workout | null) {
+function entryCompletion(entry: JournalEntry, workout: DisplayWorkout | null) {
   if (!workout) {
     return 0;
   }
@@ -192,6 +217,47 @@ function entryCompletion(entry: JournalEntry, workout: Workout | null) {
 function numberValue(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function chartScale(values: number[]) {
+  if (values.length === 0) {
+    return { domain: [0, 1] as [number, number], ticks: [0, 1] };
+  }
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min;
+  const padding = range === 0 ? Math.max(1, Math.abs(max) * 0.01) : Math.max(1, range * (values.length <= 3 ? 0.6 : 0.25));
+  const lower = Math.floor(min - padding);
+  const upper = Math.ceil(max + padding);
+  const domain: [number, number] = lower === upper ? [lower - 1, upper + 1] : [lower, upper];
+  const span = domain[1] - domain[0];
+  const ticks = span <= 8
+    ? Array.from({ length: span + 1 }, (_, index) => domain[0] + index)
+    : Array.from({ length: 5 }, (_, index) => Number((domain[0] + (span / 4) * index).toFixed(1)));
+
+  return { domain, ticks };
+}
+
+function formatAxisValue(value: number) {
+  return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+}
+
+function snapshotEntriesForWorkout(state: LiftState, workout: Workout) {
+  const exerciseIds = new Set(workout.exercises.map((exercise) => exercise.id));
+
+  return Object.fromEntries(
+    Object.entries(state.entries).map(([date, entry]) => {
+      const hasWorkoutData = Object.keys(entry.exercises).some((exerciseId) => exerciseIds.has(exerciseId));
+      const usesWorkout = entry.workoutId === workout.id || state.schedule[dayKeyForDate(date)] === workout.id;
+
+      if (!entry.workoutSnapshot && (hasWorkoutData || usesWorkout)) {
+        return [date, { ...entry, workoutSnapshot: snapshotWorkout(workout) }];
+      }
+
+      return [date, entry];
+    })
+  );
 }
 
 export function App() {
@@ -265,9 +331,29 @@ export function App() {
   const entry = ensureEntry(state, selectedDate);
   const workout = getWorkout(state, selectedDate);
   const selectedWorkout = state.workouts.find((item) => item.id === selectedWorkoutId) ?? state.workouts[0] ?? null;
-  const allExercises = state.workouts.flatMap((item) =>
-    item.exercises.map((exercise) => ({ workout: item.name, exercise }))
-  );
+  const allExercises = useMemo(() => {
+    const seen = new Set<string>();
+    const items: Array<{ workout: string; exercise: Exercise }> = [];
+
+    for (const item of state.workouts) {
+      for (const exercise of item.exercises) {
+        if (seen.has(exercise.id)) continue;
+        seen.add(exercise.id);
+        items.push({ workout: item.name, exercise });
+      }
+    }
+
+    for (const entryItem of Object.values(state.entries)) {
+      if (!entryItem.workoutSnapshot) continue;
+      for (const exercise of entryItem.workoutSnapshot.exercises) {
+        if (seen.has(exercise.id)) continue;
+        seen.add(exercise.id);
+        items.push({ workout: entryItem.workoutSnapshot.name, exercise });
+      }
+    }
+
+    return items;
+  }, [state.entries, state.workouts]);
   const workoutOptions = useMemo<SelectOption[]>(
     () => [
       { value: "", label: "Rest" },
@@ -278,16 +364,29 @@ export function App() {
     ],
     [state.workouts]
   );
+  const hasDetachedSnapshot = Boolean(
+    entry.workoutSnapshot &&
+    entry.workoutId !== undefined &&
+    !workoutOptions.some((option) => option.value === (entry.workoutId ?? ""))
+  );
   const journalWorkoutOptions = useMemo<SelectOption[]>(
     () => [
+      ...(hasDetachedSnapshot && entry.workoutSnapshot
+        ? [{ value: "__snapshot__", label: `Saved: ${entry.workoutSnapshot.name.trim() || "Workout"}` }]
+        : []),
       {
         value: "__schedule__",
-        label: `Plan: ${getWorkout({ ...state, entries: { ...state.entries, [selectedDate]: { ...entry, workoutId: undefined } } }, selectedDate)?.name.trim() || "Rest"}`
+        label: `Plan: ${getPlannedWorkout(state, selectedDate)?.name.trim() || "Rest"}`
       },
       ...workoutOptions
     ],
-    [entry, selectedDate, state, workoutOptions]
+    [entry.workoutSnapshot, hasDetachedSnapshot, selectedDate, state, workoutOptions]
   );
+  const journalWorkoutValue = hasDetachedSnapshot
+    ? "__snapshot__"
+    : entry.workoutId === undefined
+      ? "__schedule__"
+      : entry.workoutId ?? "";
   const metricOptions = useMemo<SelectOption[]>(
     () => [
       { value: "bodyWeight", label: "Body weight" },
@@ -318,6 +417,10 @@ export function App() {
       })
       .filter((item): item is { date: string; value: number } => item !== null);
   }, [metric, state.entries]);
+  const chartYAxis = useMemo(
+    () => chartScale(chartData.map((item) => item.value)),
+    [chartData]
+  );
 
   function commit(nextState: LiftState) {
     setState(nextState);
@@ -352,6 +455,8 @@ export function App() {
   }
 
   function updateEntryWorkout(value: string) {
+    if (value === "__snapshot__") return;
+
     updateEntry((current) => {
       const nextWorkoutId = value === "__schedule__" ? undefined : value || null;
       const nextWorkout = nextWorkoutId === undefined
@@ -365,6 +470,7 @@ export function App() {
       return {
         ...current,
         workoutId: nextWorkoutId,
+        workoutSnapshot: nextWorkout ? snapshotWorkout(nextWorkout) : null,
         exercises
       };
     });
@@ -381,23 +487,37 @@ export function App() {
   }
 
   function updateWorkout(workoutId: string, patch: Partial<Workout>) {
+    const currentWorkout = state.workouts.find((workout) => workout.id === workoutId);
+    const entries = currentWorkout ? snapshotEntriesForWorkout(state, currentWorkout) : state.entries;
+
     commit({
       ...state,
+      entries,
       workouts: state.workouts.map((workout) =>
         workout.id === workoutId ? { ...workout, ...patch } : workout
       )
     });
   }
 
+  function updateSchedule(day: DayKey, workoutId: string) {
+    const currentWorkout = state.workouts.find((workoutItem) => workoutItem.id === state.schedule[day]);
+    const entries = currentWorkout ? snapshotEntriesForWorkout(state, currentWorkout) : state.entries;
+
+    commit({
+      ...state,
+      entries,
+      schedule: {
+        ...state.schedule,
+        [day]: workoutId || null
+      }
+    });
+  }
+
   function deleteWorkout(workoutId: string) {
+    const currentWorkout = state.workouts.find((workout) => workout.id === workoutId);
     const workouts = state.workouts.filter((workout) => workout.id !== workoutId);
     const schedule = { ...state.schedule };
-    const entries = Object.fromEntries(
-      Object.entries(state.entries).map(([date, journalEntry]) => [
-        date,
-        journalEntry.workoutId === workoutId ? { ...journalEntry, workoutId: undefined } : journalEntry
-      ])
-    );
+    const entries = currentWorkout ? snapshotEntriesForWorkout(state, currentWorkout) : state.entries;
     for (const day of dayKeys) {
       if (schedule[day] === workoutId) schedule[day] = null;
     }
@@ -406,8 +526,12 @@ export function App() {
   }
 
   function updateExercise(workoutId: string, exerciseId: string, patch: Partial<Exercise>) {
+    const currentWorkout = state.workouts.find((workout) => workout.id === workoutId);
+    const entries = currentWorkout ? snapshotEntriesForWorkout(state, currentWorkout) : state.entries;
+
     commit({
       ...state,
+      entries,
       workouts: state.workouts.map((workout) =>
         workout.id === workoutId
           ? {
@@ -439,8 +563,12 @@ export function App() {
   }
 
   function deleteExercise(workoutId: string, exerciseId: string) {
+    const currentWorkout = state.workouts.find((workout) => workout.id === workoutId);
+    const entries = currentWorkout ? snapshotEntriesForWorkout(state, currentWorkout) : state.entries;
+
     commit({
       ...state,
+      entries,
       workouts: state.workouts.map((workout) =>
         workout.id === workoutId
           ? {
@@ -531,7 +659,7 @@ export function App() {
                     <p>{entry.workoutId === undefined ? "Using weekly plan" : "Only for this day"}</p>
                   </div>
                   <CustomSelect
-                    value={entry.workoutId === undefined ? "__schedule__" : entry.workoutId ?? ""}
+                    value={journalWorkoutValue}
                     options={journalWorkoutOptions}
                     onChange={updateEntryWorkout}
                   />
@@ -612,15 +740,7 @@ export function App() {
                       <CustomSelect
                         value={state.schedule[day] ?? ""}
                         options={workoutOptions}
-                        onChange={(event) =>
-                          commit({
-                            ...state,
-                            schedule: {
-                              ...state.schedule,
-                              [day]: event || null
-                            }
-                          })
-                        }
+                        onChange={(event) => updateSchedule(day, event)}
                       />
                     </div>
                   ))}
@@ -729,7 +849,15 @@ export function App() {
                       <ReLineChart data={chartData} margin={{ top: 16, right: 12, left: 0, bottom: 8 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--line-muted)" />
                         <XAxis dataKey="date" stroke="var(--text-muted)" tickLine={false} axisLine={false} />
-                        <YAxis stroke="var(--text-muted)" tickLine={false} axisLine={false} width={42} />
+                        <YAxis
+                          stroke="var(--text-muted)"
+                          tickLine={false}
+                          axisLine={false}
+                          width={48}
+                          domain={chartYAxis.domain}
+                          ticks={chartYAxis.ticks}
+                          tickFormatter={formatAxisValue}
+                        />
                         <Tooltip
                           contentStyle={{
                             background: "var(--surface)",

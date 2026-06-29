@@ -13,6 +13,19 @@ export interface Workout {
   exercises: Exercise[];
 }
 
+export interface ExerciseSnapshot {
+  id: string;
+  name: string;
+  sets: number;
+  reps: number;
+}
+
+export interface WorkoutSnapshot {
+  id: string;
+  name: string;
+  exercises: ExerciseSnapshot[];
+}
+
 export interface EntrySet {
   weight: string;
   reps: string;
@@ -26,6 +39,7 @@ export interface ExerciseEntry {
 export interface JournalEntry {
   date: string;
   workoutId?: string | null;
+  workoutSnapshot?: WorkoutSnapshot | null;
   bodyWeight: string;
   notes: string;
   exercises: Record<string, ExerciseEntry>;
