@@ -116,23 +116,8 @@ pub async fn create_month(
                 .ok();
             }
 
-            let fixed_expenses: Vec<(String, f64, i64)> =
-                sqlx::query_as("SELECT label, amount, sort_order FROM fixed_expenses WHERE user_id = ? ORDER BY sort_order, id")
-                    .bind(claims.sub)
-                    .fetch_all(&pool)
-                    .await?;
-
-            for (label, amount, sort_order) in fixed_expenses {
-                sqlx::query(
-                    "INSERT INTO monthly_fixed_expenses (month_id, label, amount, sort_order) VALUES (?, ?, ?, ?)",
-                )
-                .bind(id)
-                .bind(label)
-                .bind(amount)
-                .bind(sort_order)
-                .execute(&pool)
+            seed_fixed_expenses_for_month(&pool, claims.sub, id, payload.year, payload.month)
                 .await?;
-            }
 
             let (savings, retirement_savings, savings_goal): (f64, f64, f64) = sqlx::query_as(
                 "SELECT savings, retirement_savings, savings_goal FROM users WHERE id = ?",
@@ -163,6 +148,62 @@ pub async fn create_month(
     };
 
     get_month_summary(&pool, claims.sub, month_record.id).await
+}
+
+/// Seeds a newly created month's fixed expenses. Fixed expenses are stored per-month
+/// (`monthly_fixed_expenses`) so they can be edited independently for each month, but a new
+/// month should still start from whatever was set up in the most recent prior month. Only
+/// falls back to the user's global `fixed_expenses` templates when there is no earlier month
+/// to carry forward from (e.g. the very first month for a user).
+async fn seed_fixed_expenses_for_month(
+    pool: &SqlitePool,
+    user_id: i64,
+    new_month_id: i64,
+    year: i32,
+    month: i32,
+) -> Result<(), PaymeError> {
+    let previous_month_id: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM months WHERE user_id = ? AND (year < ? OR (year = ? AND month < ?)) ORDER BY year DESC, month DESC LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(year)
+    .bind(year)
+    .bind(month)
+    .fetch_optional(pool)
+    .await?;
+
+    let fixed_expenses: Vec<(String, f64, i64)> = match previous_month_id {
+        Some(prev_month_id) => {
+            sqlx::query_as(
+                "SELECT label, amount, sort_order FROM monthly_fixed_expenses WHERE month_id = ? ORDER BY sort_order, id",
+            )
+            .bind(prev_month_id)
+            .fetch_all(pool)
+            .await?
+        }
+        None => {
+            sqlx::query_as(
+                "SELECT label, amount, sort_order FROM fixed_expenses WHERE user_id = ? ORDER BY sort_order, id",
+            )
+            .bind(user_id)
+            .fetch_all(pool)
+            .await?
+        }
+    };
+
+    for (label, amount, sort_order) in fixed_expenses {
+        sqlx::query(
+            "INSERT INTO monthly_fixed_expenses (month_id, label, amount, sort_order) VALUES (?, ?, ?, ?)",
+        )
+        .bind(new_month_id)
+        .bind(label)
+        .bind(amount)
+        .bind(sort_order)
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
 }
 
 #[utoipa::path(
@@ -224,23 +265,7 @@ pub async fn get_or_create_current_month(
                 .ok();
             }
 
-            let fixed_expenses: Vec<(String, f64, i64)> =
-                sqlx::query_as("SELECT label, amount, sort_order FROM fixed_expenses WHERE user_id = ? ORDER BY sort_order, id")
-                    .bind(claims.sub)
-                    .fetch_all(&pool)
-                    .await?;
-
-            for (label, amount, sort_order) in fixed_expenses {
-                sqlx::query(
-                    "INSERT INTO monthly_fixed_expenses (month_id, label, amount, sort_order) VALUES (?, ?, ?, ?)",
-                )
-                .bind(id)
-                .bind(label)
-                .bind(amount)
-                .bind(sort_order)
-                .execute(&pool)
-                .await?;
-            }
+            seed_fixed_expenses_for_month(&pool, claims.sub, id, year, month).await?;
 
             let (savings, retirement_savings, savings_goal): (f64, f64, f64) = sqlx::query_as(
                 "SELECT savings, retirement_savings, savings_goal FROM users WHERE id = ?",

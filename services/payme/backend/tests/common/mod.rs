@@ -301,6 +301,23 @@ pub async fn create_test_fixed_expense(
     .expect("Failed to create test fixed expense")
 }
 
+pub async fn create_test_monthly_fixed_expense(
+    pool: &SqlitePool,
+    month_id: i64,
+    label: &str,
+    amount: f64,
+) -> i64 {
+    sqlx::query_scalar::<_, i64>(
+        "INSERT INTO monthly_fixed_expenses (month_id, label, amount) VALUES (?, ?, ?) RETURNING id",
+    )
+    .bind(month_id)
+    .bind(label)
+    .bind(amount)
+    .fetch_one(pool)
+    .await
+    .expect("Failed to create test monthly fixed expense")
+}
+
 pub async fn create_test_income(pool: &SqlitePool, month_id: i64, label: &str, amount: f64) -> i64 {
     sqlx::query_scalar::<_, i64>(
         "INSERT INTO income_entries (month_id, label, amount) VALUES (?, ?, ?) RETURNING id",
