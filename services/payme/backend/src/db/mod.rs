@@ -226,6 +226,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             label TEXT NOT NULL,
             amount REAL NOT NULL,
             sort_order INTEGER NOT NULL DEFAULT 0,
+            group_id INTEGER,
             FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
         )
         "#,
@@ -239,6 +240,13 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await
     .ok();
+
+    // Links the "same" fixed expense across months so edits can propagate forward.
+    // Internal only; never exposed through the API.
+    sqlx::query("ALTER TABLE monthly_fixed_expenses ADD COLUMN group_id INTEGER")
+        .execute(pool)
+        .await
+        .ok();
 
     sqlx::query("UPDATE monthly_fixed_expenses SET sort_order = id WHERE sort_order = 0 AND NOT EXISTS (SELECT 1 FROM monthly_fixed_expenses WHERE sort_order <> 0)")
         .execute(pool)
@@ -364,6 +372,25 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .ok();
         }
     }
+
+    // Backfill group_id for rows created before the column existed (including the
+    // template-seeded rows inserted just above). Rows belonging to the same user with the
+    // same label are assumed to be the same recurring expense and share a group.
+    sqlx::query(
+        r#"
+        UPDATE monthly_fixed_expenses SET group_id = (
+            SELECT MIN(other.id)
+            FROM monthly_fixed_expenses other
+            JOIN months om ON om.id = other.month_id
+            JOIN months tm ON tm.id = monthly_fixed_expenses.month_id
+            WHERE om.user_id = tm.user_id AND other.label = monthly_fixed_expenses.label
+        )
+        WHERE group_id IS NULL
+        "#,
+    )
+    .execute(pool)
+    .await
+    .ok();
 
     Ok(())
 }

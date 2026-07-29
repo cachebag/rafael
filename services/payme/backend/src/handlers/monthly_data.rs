@@ -55,12 +55,13 @@ pub async fn create_monthly_fixed_expense(
 ) -> Result<Json<MonthlyFixedExpense>, PaymeError> {
     payload.validate()?;
 
-    let _: (i64,) = sqlx::query_as("SELECT id FROM months WHERE id = ? AND user_id = ?")
-        .bind(month_id)
-        .bind(claims.sub)
-        .fetch_optional(&pool)
-        .await?
-        .ok_or(PaymeError::NotFound)?;
+    let (year, month): (i64, i64) =
+        sqlx::query_as("SELECT year, month FROM months WHERE id = ? AND user_id = ?")
+            .bind(month_id)
+            .bind(claims.sub)
+            .fetch_optional(&pool)
+            .await?
+            .ok_or(PaymeError::NotFound)?;
 
     let sort_order: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM monthly_fixed_expenses WHERE month_id = ?",
@@ -79,12 +80,63 @@ pub async fn create_monthly_fixed_expense(
     .fetch_one(&pool)
     .await?;
 
+    // The new row starts its own group; the group links copies of this expense across
+    // months so later edits can propagate forward.
+    sqlx::query("UPDATE monthly_fixed_expenses SET group_id = id WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await?;
+
+    // A fixed expense recurs until stopped: add it to every later open month too.
+    // Closed months are settled history and are left alone.
+    let later_open_months = later_open_month_ids(&pool, claims.sub, year, month).await?;
+    for later_month_id in later_open_months {
+        let sort_order: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM monthly_fixed_expenses WHERE month_id = ?",
+        )
+        .bind(later_month_id)
+        .fetch_one(&pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO monthly_fixed_expenses (month_id, label, amount, sort_order, group_id) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(later_month_id)
+        .bind(&payload.label)
+        .bind(payload.amount)
+        .bind(sort_order)
+        .bind(id)
+        .execute(&pool)
+        .await?;
+    }
+
     Ok(Json(MonthlyFixedExpense {
         id,
         month_id,
         label: payload.label,
         amount: payload.amount,
     }))
+}
+
+/// IDs of all of the user's open (not closed) months strictly after `year`/`month`,
+/// i.e. the months a fixed-expense change should propagate forward into.
+async fn later_open_month_ids(
+    pool: &SqlitePool,
+    user_id: i64,
+    year: i64,
+    month: i64,
+) -> Result<Vec<i64>, PaymeError> {
+    let ids: Vec<i64> = sqlx::query_scalar(
+        "SELECT id FROM months WHERE user_id = ? AND is_closed = 0 AND (year > ? OR (year = ? AND month > ?)) ORDER BY year, month",
+    )
+    .bind(user_id)
+    .bind(year)
+    .bind(year)
+    .bind(month)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(ids)
 }
 
 #[utoipa::path(
@@ -112,15 +164,16 @@ pub async fn update_monthly_fixed_expense(
 ) -> Result<Json<MonthlyFixedExpense>, PaymeError> {
     payload.validate()?;
 
-    let _: (i64,) = sqlx::query_as("SELECT id FROM months WHERE id = ? AND user_id = ?")
-        .bind(month_id)
-        .bind(claims.sub)
-        .fetch_optional(&pool)
-        .await?
-        .ok_or(PaymeError::NotFound)?;
+    let (year, month): (i64, i64) =
+        sqlx::query_as("SELECT year, month FROM months WHERE id = ? AND user_id = ?")
+            .bind(month_id)
+            .bind(claims.sub)
+            .fetch_optional(&pool)
+            .await?
+            .ok_or(PaymeError::NotFound)?;
 
-    let existing: MonthlyFixedExpense = sqlx::query_as(
-        "SELECT id, month_id, label, amount FROM monthly_fixed_expenses WHERE id = ? AND month_id = ?",
+    let (existing_label, existing_amount, group_id): (String, f64, Option<i64>) = sqlx::query_as(
+        "SELECT label, amount, group_id FROM monthly_fixed_expenses WHERE id = ? AND month_id = ?",
     )
     .bind(expense_id)
     .bind(month_id)
@@ -128,8 +181,8 @@ pub async fn update_monthly_fixed_expense(
     .await?
     .ok_or(PaymeError::NotFound)?;
 
-    let label = payload.label.unwrap_or(existing.label);
-    let amount = payload.amount.unwrap_or(existing.amount);
+    let label = payload.label.unwrap_or(existing_label);
+    let amount = payload.amount.unwrap_or(existing_amount);
 
     sqlx::query("UPDATE monthly_fixed_expenses SET label = ?, amount = ? WHERE id = ?")
         .bind(&label)
@@ -137,6 +190,23 @@ pub async fn update_monthly_fixed_expense(
         .bind(expense_id)
         .execute(&pool)
         .await?;
+
+    // Propagate the change to this expense's copies in later open months. Earlier
+    // months and closed months keep their values: history stays frozen.
+    if let Some(group_id) = group_id {
+        let later_open_months = later_open_month_ids(&pool, claims.sub, year, month).await?;
+        for later_month_id in later_open_months {
+            sqlx::query(
+                "UPDATE monthly_fixed_expenses SET label = ?, amount = ? WHERE group_id = ? AND month_id = ?",
+            )
+            .bind(&label)
+            .bind(amount)
+            .bind(group_id)
+            .bind(later_month_id)
+            .execute(&pool)
+            .await?;
+        }
+    }
 
     Ok(Json(MonthlyFixedExpense {
         id: expense_id,
@@ -163,18 +233,40 @@ pub async fn delete_monthly_fixed_expense(
     axum::Extension(claims): axum::Extension<Claims>,
     Path((month_id, expense_id)): Path<(i64, i64)>,
 ) -> Result<StatusCode, PaymeError> {
-    let _: (i64,) = sqlx::query_as("SELECT id FROM months WHERE id = ? AND user_id = ?")
-        .bind(month_id)
-        .bind(claims.sub)
-        .fetch_optional(&pool)
-        .await?
-        .ok_or(PaymeError::NotFound)?;
+    let (year, month): (i64, i64) =
+        sqlx::query_as("SELECT year, month FROM months WHERE id = ? AND user_id = ?")
+            .bind(month_id)
+            .bind(claims.sub)
+            .fetch_optional(&pool)
+            .await?
+            .ok_or(PaymeError::NotFound)?;
+
+    let group_id: Option<Option<i64>> = sqlx::query_scalar(
+        "SELECT group_id FROM monthly_fixed_expenses WHERE id = ? AND month_id = ?",
+    )
+    .bind(expense_id)
+    .bind(month_id)
+    .fetch_optional(&pool)
+    .await?;
 
     sqlx::query("DELETE FROM monthly_fixed_expenses WHERE id = ? AND month_id = ?")
         .bind(expense_id)
         .bind(month_id)
         .execute(&pool)
         .await?;
+
+    // Deleting means "this expense stops here": remove its copies from later open
+    // months too. Earlier and closed months keep it, so history is preserved.
+    if let Some(Some(group_id)) = group_id {
+        let later_open_months = later_open_month_ids(&pool, claims.sub, year, month).await?;
+        for later_month_id in later_open_months {
+            sqlx::query("DELETE FROM monthly_fixed_expenses WHERE group_id = ? AND month_id = ?")
+                .bind(group_id)
+                .bind(later_month_id)
+                .execute(&pool)
+                .await?;
+        }
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

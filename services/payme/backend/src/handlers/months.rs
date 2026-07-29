@@ -172,10 +172,10 @@ async fn seed_fixed_expenses_for_month(
     .fetch_optional(pool)
     .await?;
 
-    let fixed_expenses: Vec<(String, f64, i64)> = match previous_month_id {
+    let fixed_expenses: Vec<(String, f64, i64, Option<i64>)> = match previous_month_id {
         Some(prev_month_id) => {
             sqlx::query_as(
-                "SELECT label, amount, sort_order FROM monthly_fixed_expenses WHERE month_id = ? ORDER BY sort_order, id",
+                "SELECT label, amount, sort_order, group_id FROM monthly_fixed_expenses WHERE month_id = ? ORDER BY sort_order, id",
             )
             .bind(prev_month_id)
             .fetch_all(pool)
@@ -183,7 +183,7 @@ async fn seed_fixed_expenses_for_month(
         }
         None => {
             sqlx::query_as(
-                "SELECT label, amount, sort_order FROM fixed_expenses WHERE user_id = ? ORDER BY sort_order, id",
+                "SELECT label, amount, sort_order, NULL FROM fixed_expenses WHERE user_id = ? ORDER BY sort_order, id",
             )
             .bind(user_id)
             .fetch_all(pool)
@@ -191,16 +191,25 @@ async fn seed_fixed_expenses_for_month(
         }
     };
 
-    for (label, amount, sort_order) in fixed_expenses {
-        sqlx::query(
-            "INSERT INTO monthly_fixed_expenses (month_id, label, amount, sort_order) VALUES (?, ?, ?, ?)",
+    for (label, amount, sort_order, group_id) in fixed_expenses {
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO monthly_fixed_expenses (month_id, label, amount, sort_order, group_id) VALUES (?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(new_month_id)
         .bind(label)
         .bind(amount)
         .bind(sort_order)
-        .execute(pool)
+        .bind(group_id)
+        .fetch_one(pool)
         .await?;
+
+        // Rows without a group (e.g. seeded from the global template) start their own.
+        if group_id.is_none() {
+            sqlx::query("UPDATE monthly_fixed_expenses SET group_id = id WHERE id = ?")
+                .bind(id)
+                .execute(pool)
+                .await?;
+        }
     }
 
     Ok(())

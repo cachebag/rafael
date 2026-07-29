@@ -175,6 +175,7 @@ async fn run_migrations(pool: &SqlitePool) {
             label TEXT NOT NULL,
             amount REAL NOT NULL,
             sort_order INTEGER NOT NULL DEFAULT 0,
+            group_id INTEGER,
             FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE
         )
         "#,
@@ -307,7 +308,7 @@ pub async fn create_test_monthly_fixed_expense(
     label: &str,
     amount: f64,
 ) -> i64 {
-    sqlx::query_scalar::<_, i64>(
+    let id = sqlx::query_scalar::<_, i64>(
         "INSERT INTO monthly_fixed_expenses (month_id, label, amount) VALUES (?, ?, ?) RETURNING id",
     )
     .bind(month_id)
@@ -315,7 +316,16 @@ pub async fn create_test_monthly_fixed_expense(
     .bind(amount)
     .fetch_one(pool)
     .await
-    .expect("Failed to create test monthly fixed expense")
+    .expect("Failed to create test monthly fixed expense");
+
+    // Mirror the production handlers: each expense starts its own propagation group.
+    sqlx::query("UPDATE monthly_fixed_expenses SET group_id = id WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await
+        .expect("Failed to set group_id on test monthly fixed expense");
+
+    id
 }
 
 pub async fn create_test_income(pool: &SqlitePool, month_id: i64, label: &str, amount: f64) -> i64 {
