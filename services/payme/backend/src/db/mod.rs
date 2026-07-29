@@ -78,6 +78,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             default_amount REAL NOT NULL,
             color TEXT NOT NULL DEFAULT '#71717a',
             sort_order INTEGER NOT NULL DEFAULT 0,
+            archived_at TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
         "#,
@@ -97,6 +98,14 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .ok();
 
     sqlx::query("UPDATE budget_categories SET sort_order = id WHERE sort_order = 0 AND NOT EXISTS (SELECT 1 FROM budget_categories WHERE sort_order <> 0)")
+        .execute(pool)
+        .await
+        .ok();
+
+    // Retiring a category sets this instead of deleting the row: `monthly_budgets` and `items`
+    // reference categories with ON DELETE CASCADE, so dropping the row would erase every
+    // month's allocations and transactions for it, history included.
+    sqlx::query("ALTER TABLE budget_categories ADD COLUMN archived_at TEXT")
         .execute(pool)
         .await
         .ok();

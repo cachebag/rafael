@@ -72,6 +72,7 @@ async fn run_migrations(pool: &SqlitePool) {
             default_amount REAL NOT NULL,
             color TEXT NOT NULL DEFAULT '#71717a',
             sort_order INTEGER NOT NULL DEFAULT 0,
+            archived_at TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
         "#,

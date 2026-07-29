@@ -92,7 +92,10 @@ pub fn create_app(pool: SqlitePool) -> Router {
         .route("/api/categories", post(budget::create_category))
         .route("/api/categories/reorder", put(budget::reorder_categories))
         .route("/api/categories/{id}", put(budget::update_category))
-        .route("/api/categories/{id}", delete(budget::delete_category))
+        .route(
+            "/api/months/{month_id}/categories/{id}",
+            delete(budget::delete_month_category),
+        )
         .route(
             "/api/months/{id}/budgets",
             get(budget::list_monthly_budgets),

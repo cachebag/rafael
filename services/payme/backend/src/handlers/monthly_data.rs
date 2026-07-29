@@ -119,8 +119,8 @@ pub async fn create_monthly_fixed_expense(
 }
 
 /// IDs of all of the user's open (not closed) months strictly after `year`/`month`,
-/// i.e. the months a fixed-expense change should propagate forward into.
-async fn later_open_month_ids(
+/// i.e. the months a recurring change should propagate forward into.
+pub(crate) async fn later_open_month_ids(
     pool: &SqlitePool,
     user_id: i64,
     year: i64,

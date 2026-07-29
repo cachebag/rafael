@@ -100,13 +100,14 @@ pub async fn create_item(
     payload.validate()?;
     verify_month_not_closed(&pool, claims.sub, month_id).await?;
 
-    let _category: (i64,) =
-        sqlx::query_as("SELECT id FROM budget_categories WHERE id = ? AND user_id = ?")
-            .bind(payload.category_id)
-            .bind(claims.sub)
-            .fetch_optional(&pool)
-            .await?
-            .ok_or(PaymeError::BadRequest("Invalid category".to_string()))?;
+    let _category: (i64,) = sqlx::query_as(
+        "SELECT id FROM budget_categories WHERE id = ? AND user_id = ? AND archived_at IS NULL",
+    )
+    .bind(payload.category_id)
+    .bind(claims.sub)
+    .fetch_optional(&pool)
+    .await?
+    .ok_or(PaymeError::BadRequest("Invalid category".to_string()))?;
 
     let sort_order: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM items WHERE month_id = ?",
@@ -203,13 +204,14 @@ pub async fn update_item(
         .unwrap_or(existing.savings_destination.clone());
 
     if payload.category_id.is_some() {
-        let _category: (i64,) =
-            sqlx::query_as("SELECT id FROM budget_categories WHERE id = ? AND user_id = ?")
-                .bind(category_id)
-                .bind(claims.sub)
-                .fetch_optional(&pool)
-                .await?
-                .ok_or(PaymeError::BadRequest("Invalid category".to_string()))?;
+        let _category: (i64,) = sqlx::query_as(
+            "SELECT id FROM budget_categories WHERE id = ? AND user_id = ? AND archived_at IS NULL",
+        )
+        .bind(category_id)
+        .bind(claims.sub)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or(PaymeError::BadRequest("Invalid category".to_string()))?;
     }
 
     sqlx::query(

@@ -66,7 +66,12 @@ export function BudgetSection({
 
   const handleAddCategory = async () => {
     if (!label || !amount) return;
-    await api.categories.create({ label, default_amount: parseFloat(amount), color });
+    await api.categories.create({
+      label,
+      default_amount: parseFloat(amount),
+      color,
+      month_id: monthId,
+    });
     setLabel("");
     setAmount("");
     setColor("#71717a");
@@ -84,8 +89,12 @@ export function BudgetSection({
     await onUpdate();
   };
 
-  const handleDeleteCategory = async (id: number) => {
-    await api.categories.delete(id);
+  const handleDeleteCategory = async (categoryId: number, label: string) => {
+    const confirmed = confirm(
+      `Stop using "${label}" from this month on? Earlier months keep it, along with anything already spent.`
+    );
+    if (!confirmed) return;
+    await api.categories.delete(monthId, categoryId);
     await onUpdate();
   };
 
@@ -209,12 +218,23 @@ export function BudgetSection({
                             {formatCurrency(budget.spent_amount)} / {formatCurrency(budget.allocated_amount)}
                           </span>
                           {!isReadOnly && (
-                            <button
-                              onClick={() => startEditBudget(budget)}
-                              className="p-1 hover:bg-sand-200 dark:hover:bg-charcoal-800"
-                            >
-                              <Edit2 size={12} />
-                            </button>
+                            <>
+                              <button
+                                onClick={() => startEditBudget(budget)}
+                                className="p-1 hover:bg-sand-200 dark:hover:bg-charcoal-800"
+                              >
+                                <Edit2 size={12} />
+                              </button>
+                              <button
+                                onClick={() =>
+                                  handleDeleteCategory(budget.category_id, budget.category_label)
+                                }
+                                title="Stop using this category"
+                                className="p-1 text-terracotta-500 hover:bg-terracotta-100 dark:hover:bg-charcoal-800"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </>
                           )}
                         </div>
                       </div>
@@ -235,7 +255,9 @@ export function BudgetSection({
 
       <Modal isOpen={isManaging} onClose={() => setIsManaging(false)} title="Manage Categories">
         <p className="text-xs text-charcoal-500 dark:text-charcoal-400 mb-4">
-          Categories define your budget types. Default amounts apply to new months.
+          Categories define your budget types. Default amounts apply to new months. To stop
+          using one, remove it from the budget list &mdash; the months before it keep their
+          history.
         </p>
         <div className="space-y-3">
           <SortableList ids={categoryIds} onDragEnd={handleCategoryDragEnd}>
@@ -316,12 +338,6 @@ export function BudgetSection({
                           className="p-1 hover:bg-sand-200 dark:hover:bg-charcoal-800"
                         >
                           <Edit2 size={14} />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteCategory(cat.id)}
-                          className="p-1 text-terracotta-500 hover:bg-terracotta-100 dark:hover:bg-charcoal-800"
-                        >
-                          <Trash2 size={14} />
                         </button>
                       </div>
                     </div>

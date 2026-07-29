@@ -92,13 +92,14 @@ pub async fn get_stats(
         let current_month_id = months[0].0;
         let previous_month_id = months.get(1).map(|m| m.0);
 
-        let categories: Vec<(i64, String, String)> =
-            sqlx::query_as("SELECT id, label, color FROM budget_categories WHERE user_id = ?")
-                .bind(claims.sub)
-                .fetch_all(&pool)
-                .await?;
+        let categories: Vec<(i64, String, String, Option<String>)> = sqlx::query_as(
+            "SELECT id, label, color, archived_at FROM budget_categories WHERE user_id = ?",
+        )
+        .bind(claims.sub)
+        .fetch_all(&pool)
+        .await?;
 
-        for (cat_id, cat_label, cat_color) in categories {
+        for (cat_id, cat_label, cat_color, archived_at) in categories {
             let current_spent: (f64,) = sqlx::query_as(
                 "SELECT COALESCE(SUM(amount), 0.0) FROM items WHERE month_id = ? AND category_id = ? AND savings_destination = 'none'",
             )
@@ -119,6 +120,12 @@ pub async fn get_stats(
             } else {
                 0.0
             };
+
+            // A retired category is still worth comparing while it has spending in either of
+            // the two months; once it drops out of both it is just noise.
+            if archived_at.is_some() && current_spent.0 == 0.0 && previous_spent == 0.0 {
+                continue;
+            }
 
             let change_amount = current_spent.0 - previous_spent;
             let change_percent = if previous_spent > 0.0 {

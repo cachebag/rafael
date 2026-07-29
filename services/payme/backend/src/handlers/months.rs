@@ -98,7 +98,7 @@ pub async fn create_month(
             .await?;
 
             let categories: Vec<(i64, f64)> = sqlx::query_as(
-                "SELECT id, default_amount FROM budget_categories WHERE user_id = ? ORDER BY sort_order, id",
+                "SELECT id, default_amount FROM budget_categories WHERE user_id = ? AND archived_at IS NULL ORDER BY sort_order, id",
             )
             .bind(claims.sub)
             .fetch_all(&pool)
@@ -256,7 +256,7 @@ pub async fn get_or_create_current_month(
             .await?;
 
             let categories: Vec<(i64, f64)> = sqlx::query_as(
-                "SELECT id, default_amount FROM budget_categories WHERE user_id = ? ORDER BY sort_order, id",
+                "SELECT id, default_amount FROM budget_categories WHERE user_id = ? AND archived_at IS NULL ORDER BY sort_order, id",
             )
             .bind(claims.sub)
             .fetch_all(&pool)

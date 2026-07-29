@@ -97,7 +97,13 @@ export const api = {
 
   categories: {
     list: () => request<BudgetCategory[]>("/categories"),
-    create: (data: { label: string; default_amount: number; color?: string }) =>
+    // month_id scopes the new category to that month onward; earlier months keep their shape.
+    create: (data: {
+      label: string;
+      default_amount: number;
+      color?: string;
+      month_id?: number;
+    }) =>
       request<BudgetCategory>("/categories", {
         method: "POST",
         body: JSON.stringify(data),
@@ -112,8 +118,10 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ ids }),
       }),
-    delete: (id: number) =>
-      request<void>(`/categories/${id}`, { method: "DELETE" }),
+    // Scoped to a month: removes the category from that month onward and leaves
+    // earlier months, closed months, and recorded transactions alone.
+    delete: (monthId: number, id: number) =>
+      request<void>(`/months/${monthId}/categories/${id}`, { method: "DELETE" }),
   },
 
   budgets: {
@@ -310,7 +318,7 @@ export interface UserExport {
   savings?: number;
   retirement_savings?: number;
   fixed_expenses: { label: string; amount: number }[];
-  categories: { label: string; default_amount: number }[];
+  categories: { label: string; default_amount: number; archived?: boolean }[];
   months: {
     year: number;
     month: number;
