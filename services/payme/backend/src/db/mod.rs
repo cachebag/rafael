@@ -222,6 +222,17 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await?;
 
     if items_sql.is_some_and(|sql| sql.contains("category_id INTEGER NOT NULL")) {
+        // The whole rebuild runs inside one transaction on one connection: every statement
+        // either lands together or rolls back together, so a failure can never leave the
+        // database between tables. (Statements straight off the pool may hit different
+        // connections, which is how a partial rebuild once stranded the data mid-rename.)
+        let mut tx = pool.begin().await?;
+
+        // A crashed earlier attempt may have left the scratch table behind.
+        sqlx::query("DROP TABLE IF EXISTS items_rebuild")
+            .execute(&mut *tx)
+            .await?;
+
         sqlx::query(
             r#"
             CREATE TABLE items_rebuild (
@@ -238,20 +249,22 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             )
             "#,
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
 
         sqlx::query(
             "INSERT INTO items_rebuild (id, month_id, category_id, description, amount, spent_on, savings_destination, sort_order)
              SELECT id, month_id, category_id, description, amount, spent_on, savings_destination, sort_order FROM items",
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
 
-        sqlx::query("DROP TABLE items").execute(pool).await?;
+        sqlx::query("DROP TABLE items").execute(&mut *tx).await?;
         sqlx::query("ALTER TABLE items_rebuild RENAME TO items")
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
+
+        tx.commit().await?;
     }
 
     // Repair transactions orphaned by the era when deleting a category removed its row
