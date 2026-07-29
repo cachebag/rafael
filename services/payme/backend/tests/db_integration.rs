@@ -936,3 +936,86 @@ async fn cannot_update_another_users_savings_goal() {
         "bob should not be able to update alice's goal"
     );
 }
+
+#[tokio::test]
+async fn migrations_rebuild_legacy_not_null_items_table() {
+    // Simulate a database from before items.category_id became nullable.
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    for sql in [
+        "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, savings REAL NOT NULL DEFAULT 0, savings_goal REAL NOT NULL DEFAULT 0, retirement_savings REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')))",
+        "CREATE TABLE budget_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, label TEXT NOT NULL, default_amount REAL NOT NULL, color TEXT NOT NULL DEFAULT '#71717a', sort_order INTEGER NOT NULL DEFAULT 0)",
+        "CREATE TABLE months (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, year INTEGER NOT NULL, month INTEGER NOT NULL, is_closed INTEGER NOT NULL DEFAULT 0, closed_at TEXT, UNIQUE(user_id, year, month))",
+        "CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, month_id INTEGER NOT NULL, category_id INTEGER NOT NULL, description TEXT NOT NULL, amount REAL NOT NULL, spent_on TEXT NOT NULL, savings_destination TEXT NOT NULL DEFAULT 'none', sort_order INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE, FOREIGN KEY (category_id) REFERENCES budget_categories(id) ON DELETE CASCADE)",
+        "INSERT INTO users (id, username, password_hash) VALUES (1, 'alice', 'x')",
+        "INSERT INTO budget_categories (id, user_id, label, default_amount) VALUES (7, 1, 'Food', 100.0)",
+        "INSERT INTO months (id, user_id, year, month) VALUES (1, 1, 2026, 7)",
+        "INSERT INTO items (id, month_id, category_id, description, amount, spent_on) VALUES (42, 1, 7, 'Lunch', 12.5, '2026-07-01')",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+
+    run_migrations(&pool).await.unwrap();
+
+    let items_sql: String =
+        sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        !items_sql.contains("category_id INTEGER NOT NULL"),
+        "rebuild must drop the NOT NULL constraint"
+    );
+
+    let (id, category_id, description, amount): (i64, Option<i64>, String, f64) =
+        sqlx::query_as("SELECT id, category_id, description, amount FROM items WHERE id = 42")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (id, category_id, description.as_str(), amount),
+        (42, Some(7), "Lunch", 12.5)
+    );
+
+    // Idempotent: a second run must not attempt another rebuild.
+    run_migrations(&pool).await.unwrap();
+}
+
+#[tokio::test]
+async fn migrations_null_out_items_orphaned_by_old_hard_deletes() {
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    run_migrations(&pool).await.unwrap();
+
+    // The pragma is per-connection, so pin one connection for the orphan insert.
+    let mut conn = pool.acquire().await.unwrap();
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO users (id, username, password_hash) VALUES (1, 'alice', 'x')")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO months (id, user_id, year, month) VALUES (1, 1, 2026, 7)")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO items (id, month_id, category_id, description, amount, spent_on) VALUES (1, 1, 999, 'Ghost', 5.0, '2026-07-01')",
+    )
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    drop(conn);
+
+    run_migrations(&pool).await.unwrap();
+
+    let category_id: Option<i64> = sqlx::query_scalar("SELECT category_id FROM items WHERE id = 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(category_id, None, "orphaned reference is cleared");
+}

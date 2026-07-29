@@ -403,7 +403,7 @@ async fn get_month_summary(
         r#"
         SELECT i.id, i.month_id, i.category_id, bc.label as category_label, bc.color as category_color, i.description, i.amount, i.spent_on, i.savings_destination
         FROM items i
-        JOIN budget_categories bc ON i.category_id = bc.id
+        LEFT JOIN budget_categories bc ON i.category_id = bc.id
         WHERE i.month_id = ?
         ORDER BY i.sort_order, i.id
         "#,
@@ -417,7 +417,7 @@ async fn get_month_summary(
         .map(|mut b| {
             b.spent_amount = items
                 .iter()
-                .filter(|i| i.category_id == b.category_id && i.savings_destination == "none")
+                .filter(|i| i.category_id == Some(b.category_id) && i.savings_destination == "none")
                 .map(|i| i.amount)
                 .sum();
             b

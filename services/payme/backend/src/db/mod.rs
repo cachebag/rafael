@@ -179,14 +179,14 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         CREATE TABLE IF NOT EXISTS items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             month_id INTEGER NOT NULL,
-            category_id INTEGER NOT NULL,
+            category_id INTEGER,
             description TEXT NOT NULL,
             amount REAL NOT NULL,
             spent_on TEXT NOT NULL,
             savings_destination TEXT NOT NULL DEFAULT 'none',
             sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE,
-            FOREIGN KEY (category_id) REFERENCES budget_categories(id) ON DELETE CASCADE
+            FOREIGN KEY (category_id) REFERENCES budget_categories(id) ON DELETE SET NULL
         )
         "#,
     )
@@ -212,6 +212,55 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await
         .ok();
+
+    // items.category_id used to be NOT NULL. A transaction whose category is removed from
+    // its month is now simply uncategorized (NULL) instead of clinging to a ghost category.
+    // SQLite cannot drop NOT NULL in place, so legacy tables are rebuilt once.
+    let items_sql: Option<String> =
+        sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'")
+            .fetch_optional(pool)
+            .await?;
+
+    if items_sql.is_some_and(|sql| sql.contains("category_id INTEGER NOT NULL")) {
+        sqlx::query(
+            r#"
+            CREATE TABLE items_rebuild (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                month_id INTEGER NOT NULL,
+                category_id INTEGER,
+                description TEXT NOT NULL,
+                amount REAL NOT NULL,
+                spent_on TEXT NOT NULL,
+                savings_destination TEXT NOT NULL DEFAULT 'none',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE,
+                FOREIGN KEY (category_id) REFERENCES budget_categories(id) ON DELETE SET NULL
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO items_rebuild (id, month_id, category_id, description, amount, spent_on, savings_destination, sort_order)
+             SELECT id, month_id, category_id, description, amount, spent_on, savings_destination, sort_order FROM items",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query("DROP TABLE items").execute(pool).await?;
+        sqlx::query("ALTER TABLE items_rebuild RENAME TO items")
+            .execute(pool)
+            .await?;
+    }
+
+    // Repair transactions orphaned by the era when deleting a category removed its row
+    // outright: they still point at ids that no longer exist. Make them uncategorized.
+    sqlx::query(
+        "UPDATE items SET category_id = NULL WHERE category_id IS NOT NULL AND category_id NOT IN (SELECT id FROM budget_categories)",
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query(
         r#"

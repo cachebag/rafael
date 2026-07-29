@@ -228,7 +228,7 @@ async fn test_delete_category_propagates_to_later_open_months_only() {
 }
 
 #[tokio::test]
-async fn test_delete_category_keeps_the_line_where_money_was_spent() {
+async fn test_delete_category_unlabels_its_transactions() {
     let (server, pool, user_id, token) = setup_with_user().await;
 
     let month_id = create_test_month(&pool, user_id, 2024, 9).await;
@@ -250,11 +250,105 @@ async fn test_delete_category_keeps_the_line_where_money_was_spent() {
 
     assert_eq!(
         summary["budgets"].as_array().unwrap().len(),
-        1,
-        "the spending still needs a line to sit under"
+        0,
+        "the category's budget line goes with it"
     );
-    assert_eq!(summary["items"].as_array().unwrap().len(), 1);
-    assert_eq!(summary["total_spent"], 40.0);
+    let items = summary["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "the transaction itself is never removed");
+    assert!(
+        items[0]["category_id"].is_null(),
+        "the transaction becomes uncategorized instead of pointing at a ghost"
+    );
+    assert!(items[0]["category_label"].is_null());
+    assert_eq!(summary["total_spent"], 40.0, "totals are unaffected");
+}
+
+#[tokio::test]
+async fn test_delete_category_unlabels_later_open_months_but_not_earlier_ones() {
+    let (server, pool, user_id, token) = setup_with_user().await;
+
+    let august_id = create_test_month(&pool, user_id, 2024, 8).await;
+    let september_id = create_test_month(&pool, user_id, 2024, 9).await;
+    let october_id = create_test_month(&pool, user_id, 2024, 10).await;
+    let cat_id = create_test_category(&pool, user_id, "Transport", 150.0).await;
+    create_test_item(&pool, august_id, cat_id, "Bus pass", 40.0, "2024-08-03").await;
+    create_test_item(&pool, september_id, cat_id, "Bus pass", 40.0, "2024-09-03").await;
+    create_test_item(&pool, october_id, cat_id, "Bus pass", 40.0, "2024-10-03").await;
+
+    server
+        .delete(&format!(
+            "/api/months/{}/categories/{}",
+            september_id, cat_id
+        ))
+        .add_header(auth_name(), auth_value(&token))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    let august: serde_json::Value = server
+        .get(&format!("/api/months/{}", august_id))
+        .add_header(auth_name(), auth_value(&token))
+        .await
+        .json();
+    assert_eq!(
+        august["items"][0]["category_label"], "Transport",
+        "earlier months keep resolving the archived label"
+    );
+
+    for month_id in [september_id, october_id] {
+        let summary: serde_json::Value = server
+            .get(&format!("/api/months/{}", month_id))
+            .add_header(auth_name(), auth_value(&token))
+            .await
+            .json();
+        assert!(
+            summary["items"][0]["category_id"].is_null(),
+            "month {month_id} unlabels the transaction"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_recreated_category_starts_genuinely_unused() {
+    let (server, pool, user_id, token) = setup_with_user().await;
+
+    let month_id = create_test_month(&pool, user_id, 2024, 9).await;
+    let cat_id = create_test_category(&pool, user_id, "Travel", 0.0).await;
+    create_test_item(&pool, month_id, cat_id, "Flights", 500.0, "2024-09-02").await;
+
+    server
+        .delete(&format!("/api/months/{}/categories/{}", month_id, cat_id))
+        .add_header(auth_name(), auth_value(&token))
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    let recreated: serde_json::Value = server
+        .post("/api/categories")
+        .add_header(auth_name(), auth_value(&token))
+        .json(&serde_json::json!({"label": "Travel", "default_amount": 0.0, "month_id": month_id}))
+        .await
+        .json();
+    let new_id = recreated["id"].as_i64().unwrap();
+    assert_ne!(new_id, cat_id, "recreation is a fresh category");
+
+    let summary: serde_json::Value = server
+        .get(&format!("/api/months/{}", month_id))
+        .add_header(auth_name(), auth_value(&token))
+        .await
+        .json();
+    let travel_budget = summary["budgets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["category_id"] == new_id)
+        .expect("recreated category gets a budget line");
+    assert_eq!(
+        travel_budget["spent_amount"], 0.0,
+        "no orphaned spending is attributed to the new category"
+    );
+    assert!(
+        summary["items"][0]["category_id"].is_null(),
+        "the old transaction stays uncategorized"
+    );
 }
 
 #[tokio::test]

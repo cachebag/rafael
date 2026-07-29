@@ -138,14 +138,14 @@ async fn run_migrations(pool: &SqlitePool) {
         CREATE TABLE IF NOT EXISTS items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             month_id INTEGER NOT NULL,
-            category_id INTEGER NOT NULL,
+            category_id INTEGER,
             description TEXT NOT NULL,
             amount REAL NOT NULL,
             spent_on TEXT NOT NULL,
             savings_destination TEXT NOT NULL DEFAULT 'none',
             sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (month_id) REFERENCES months(id) ON DELETE CASCADE,
-            FOREIGN KEY (category_id) REFERENCES budget_categories(id) ON DELETE CASCADE
+            FOREIGN KEY (category_id) REFERENCES budget_categories(id) ON DELETE SET NULL
         )
         "#,
     )

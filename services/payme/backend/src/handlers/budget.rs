@@ -235,7 +235,7 @@ pub async fn reorder_categories(
     ),
     tag = "Budgets",
     summary = "Stop using a category",
-    description = "Removes a category from this month and every later open month. Earlier months, closed months, and every recorded transaction are left untouched."
+    description = "Removes a category from this month and every later open month; its transactions in those months become uncategorized. Earlier months and closed months are left untouched."
 )]
 pub async fn delete_month_category(
     State(pool): State<SqlitePool>,
@@ -277,24 +277,20 @@ pub async fn delete_month_category(
     target_months.extend(later_open_month_ids(&pool, claims.sub, year, month).await?);
 
     for target_month_id in target_months {
-        // A month that already has spending in the category keeps its budget line, so the money
-        // still has somewhere to sit and the month's totals stay consistent. Transactions
-        // themselves are never removed by this.
-        sqlx::query(
-            r#"
-            DELETE FROM monthly_budgets
-            WHERE month_id = ? AND category_id = ?
-              AND NOT EXISTS (
-                  SELECT 1 FROM items WHERE month_id = ? AND category_id = ?
-              )
-            "#,
-        )
-        .bind(target_month_id)
-        .bind(category_id)
-        .bind(target_month_id)
-        .bind(category_id)
-        .execute(&pool)
-        .await?;
+        sqlx::query("DELETE FROM monthly_budgets WHERE month_id = ? AND category_id = ?")
+            .bind(target_month_id)
+            .bind(category_id)
+            .execute(&pool)
+            .await?;
+
+        // The transactions themselves are never removed, but the label goes with the
+        // category: they become uncategorized instead of pointing at a ghost. Earlier and
+        // closed months keep resolving the old label through the archived row.
+        sqlx::query("UPDATE items SET category_id = NULL WHERE month_id = ? AND category_id = ?")
+            .bind(target_month_id)
+            .bind(category_id)
+            .execute(&pool)
+            .await?;
     }
 
     Ok(StatusCode::NO_CONTENT)

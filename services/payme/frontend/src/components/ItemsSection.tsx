@@ -50,11 +50,12 @@ export function ItemsSection({
   };
 
   const handleUpdate = async (id: number) => {
-    if (!description || !amount || !categoryId) return;
+    if (!description || !amount) return;
+    // An uncategorized item can be saved without picking a category; it stays uncategorized.
     await api.items.update(monthId, id, {
       description,
       amount: parseFloat(amount),
-      category_id: parseInt(categoryId),
+      ...(categoryId ? { category_id: parseInt(categoryId) } : {}),
       spent_on: spentOn,
       savings_destination: "none",
     });
@@ -71,7 +72,7 @@ export function ItemsSection({
     setEditingId(item.id);
     setDescription(item.description);
     setAmount(item.amount.toString());
-    setCategoryId(item.category_id.toString());
+    setCategoryId(item.category_id?.toString() ?? "");
     setSpentOn(item.spent_on);
   };
 
@@ -85,8 +86,14 @@ export function ItemsSection({
   };
 
   const categoryOptions = categories.map((c) => ({ value: c.id, label: c.label }));
+  const hasUncategorized = items.some((item) => item.category_id === null);
+  // An uncategorized item keeps an explicit blank choice; picking a category re-labels it.
+  const editCategoryOptions = categoryId
+    ? categoryOptions
+    : [{ value: "", label: "Uncategorized" }, ...categoryOptions];
   const filterCategoryOptions = [
     { value: "all", label: "All Categories" },
+    ...(hasUncategorized ? [{ value: "uncategorized", label: "Uncategorized" }] : []),
     ...categoryOptions,
   ];
 
@@ -105,10 +112,16 @@ export function ItemsSection({
     return orderedSpendingItems
       .filter((item) => {
         const matchesCategory =
-          filterCategory === "all" || item.category_id.toString() === filterCategory;
+          filterCategory === "all"
+            ? true
+            : filterCategory === "uncategorized"
+              ? item.category_id === null
+              : item.category_id?.toString() === filterCategory;
         const matchesSearch =
           item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          item.category_label.toLowerCase().includes(searchQuery.toLowerCase());
+          (item.category_label ?? "uncategorized")
+            .toLowerCase()
+            .includes(searchQuery.toLowerCase());
         return matchesCategory && matchesSearch;
       });
   }, [orderedSpendingItems, filterCategory, searchQuery]);
@@ -294,7 +307,7 @@ export function ItemsSection({
                         </td>
                         <td className="py-2">
                           <Select
-                            options={categoryOptions}
+                            options={editCategoryOptions}
                             value={categoryId}
                             onChange={(e) => setCategoryId(e.target.value)}
                             className="text-xs"
@@ -341,12 +354,12 @@ export function ItemsSection({
                           <span
                             className="text-[10px] md:text-xs px-1.5 md:px-2 py-0.5 md:py-1 rounded-sm border whitespace-nowrap"
                             style={{
-                              backgroundColor: `${item.category_color}20`,
-                              color: item.category_color,
-                              borderColor: `${item.category_color}40`,
+                              backgroundColor: `${item.category_color ?? "#71717a"}20`,
+                              color: item.category_color ?? "#71717a",
+                              borderColor: `${item.category_color ?? "#71717a"}40`,
                             }}
                           >
-                            {item.category_label}
+                            {item.category_label ?? "Uncategorized"}
                           </span>
                         </td>
                         <td className={`py-2 px-1 text-right font-medium text-xs md:text-sm whitespace-nowrap text-terracotta-600 dark:text-terracotta-400`}>

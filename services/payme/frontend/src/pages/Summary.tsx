@@ -126,11 +126,12 @@ export function SummaryPage({ onBack, onSettingsClick, initialMonthId }: Summary
   const spendingByCategory = monthSummary?.items
     .filter(i => i.savings_destination === "none")
     .reduce((acc, item) => {
-      const existing = acc.find(c => c.category === item.category_label);
+      const label = item.category_label ?? "Uncategorized";
+      const existing = acc.find(c => c.category === label);
       if (existing) {
         existing.amount += item.amount;
       } else {
-        acc.push({ category: item.category_label, amount: item.amount });
+        acc.push({ category: label, amount: item.amount });
       }
       return acc;
     }, [] as { category: string; amount: number }[])
@@ -388,7 +389,7 @@ export function SummaryPage({ onBack, onSettingsClick, initialMonthId }: Summary
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
-                      data={topSpending.map(i => ({ name: i.description.slice(0, 20), amount: i.amount, category: i.category_label }))}
+                      data={topSpending.map(i => ({ name: i.description.slice(0, 20), amount: i.amount, category: i.category_label ?? "Uncategorized" }))}
                       layout="vertical"
                       margin={{ left: 100 }}
                     >
@@ -398,7 +399,7 @@ export function SummaryPage({ onBack, onSettingsClick, initialMonthId }: Summary
                         formatter={(value) => formatCurrency(Number(value))}
                         labelFormatter={(label) => {
                           const item = topSpending.find(i => i.description.slice(0, 20) === label);
-                          return item ? `${item.description} (${item.category_label})` : String(label);
+                          return item ? `${item.description} (${item.category_label ?? "Uncategorized"})` : String(label);
                         }}
                         contentStyle={{ backgroundColor: "#faf8f5", border: "none", fontSize: 12, color: "#1a1a1a" }}
                       />

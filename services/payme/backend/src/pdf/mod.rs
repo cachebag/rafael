@@ -149,7 +149,10 @@ pub fn generate_pdf(summary: &MonthSummary) -> Result<Vec<u8>, Box<dyn std::erro
         }
         let text = format!(
             "  {} - {} - ${:.2} ({})",
-            item.spent_on, item.description, item.amount, item.category_label
+            item.spent_on,
+            item.description,
+            item.amount,
+            item.category_label.as_deref().unwrap_or("Uncategorized")
         );
         push_text_line(&mut ops, text, 9.0, left_margin, y, BuiltinFont::Helvetica);
         y -= line_height;
@@ -246,9 +249,9 @@ mod tests {
             items: vec![ItemWithCategory {
                 id: 1,
                 month_id: 1,
-                category_id: 1,
-                category_label: "Food".to_string(),
-                category_color: "#71717a".to_string(),
+                category_id: Some(1),
+                category_label: Some("Food".to_string()),
+                category_color: Some("#71717a".to_string()),
                 description: "Groceries".to_string(),
                 amount: 150.0,
                 spent_on: NaiveDate::from_ymd_opt(2024, 6, 15).unwrap(),

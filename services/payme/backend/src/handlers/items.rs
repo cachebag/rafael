@@ -19,7 +19,7 @@ fn default_savings_destination() -> String {
 
 #[derive(Deserialize, ToSchema, Validate)]
 pub struct CreateItem {
-    pub category_id: i64,
+    pub category_id: Option<i64>,
     #[validate(length(min = 1, max = 200))]
     pub description: String,
     #[validate(range(min = 0.0))]
@@ -67,7 +67,7 @@ pub async fn list_items(
         r#"
         SELECT i.id, i.month_id, i.category_id, bc.label as category_label, bc.color as category_color, i.description, i.amount, i.spent_on, i.savings_destination
         FROM items i
-        JOIN budget_categories bc ON i.category_id = bc.id
+        LEFT JOIN budget_categories bc ON i.category_id = bc.id
         WHERE i.month_id = ?
         ORDER BY i.sort_order, i.id
         "#,
@@ -100,14 +100,17 @@ pub async fn create_item(
     payload.validate()?;
     verify_month_not_closed(&pool, claims.sub, month_id).await?;
 
-    let _category: (i64,) = sqlx::query_as(
-        "SELECT id FROM budget_categories WHERE id = ? AND user_id = ? AND archived_at IS NULL",
-    )
-    .bind(payload.category_id)
-    .bind(claims.sub)
-    .fetch_optional(&pool)
-    .await?
-    .ok_or(PaymeError::BadRequest("Invalid category".to_string()))?;
+    // Uncategorized items are allowed; a concrete category must be live and owned.
+    if let Some(category_id) = payload.category_id {
+        let _category: (i64,) = sqlx::query_as(
+            "SELECT id FROM budget_categories WHERE id = ? AND user_id = ? AND archived_at IS NULL",
+        )
+        .bind(category_id)
+        .bind(claims.sub)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or(PaymeError::BadRequest("Invalid category".to_string()))?;
+    }
 
     let sort_order: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM items WHERE month_id = ?",
@@ -195,7 +198,8 @@ pub async fn update_item(
     .await?
     .ok_or(PaymeError::NotFound)?;
 
-    let category_id = payload.category_id.unwrap_or(existing.category_id);
+    // `Some` re-categorizes; `None` keeps whatever the item had (possibly uncategorized).
+    let category_id = payload.category_id.or(existing.category_id);
     let description = payload.description.unwrap_or(existing.description);
     let amount = payload.amount.unwrap_or(existing.amount);
     let spent_on = payload.spent_on.unwrap_or(existing.spent_on);

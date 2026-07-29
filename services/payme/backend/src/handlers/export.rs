@@ -59,7 +59,9 @@ pub struct BudgetExport {
 
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct ItemExport {
-    pub category_label: String,
+    /// `None` means the transaction is uncategorized.
+    #[serde(default)]
+    pub category_label: Option<String>,
     pub description: String,
     pub amount: f64,
     pub spent_on: String,
@@ -155,15 +157,17 @@ pub async fn export_json(
 
         let mut item_exports = Vec::new();
         for item in items {
-            let cat = categories.iter().find(|c| c.id == item.category_id);
-            if let Some(cat) = cat {
-                item_exports.push(ItemExport {
-                    category_label: cat.label.clone(),
-                    description: item.description,
-                    amount: item.amount,
-                    spent_on: item.spent_on.to_string(),
-                });
-            }
+            // Uncategorized transactions export with no label rather than being dropped.
+            let category_label = item
+                .category_id
+                .and_then(|id| categories.iter().find(|c| c.id == id))
+                .map(|c| c.label.clone());
+            item_exports.push(ItemExport {
+                category_label,
+                description: item.description,
+                amount: item.amount,
+                spent_on: item.spent_on.to_string(),
+            });
         }
 
         month_exports.push(MonthExport {
@@ -356,19 +360,22 @@ pub async fn import_json(
         }
 
         for (index, item) in month_data.items.iter().enumerate() {
-            if let Some(&cat_id) = category_map.get(&item.category_label) {
-                sqlx::query(
-                    "INSERT INTO items (month_id, category_id, description, amount, spent_on, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
-                )
-                .bind(month_id)
-                .bind(cat_id)
-                .bind(&item.description)
-                .bind(item.amount)
-                .bind(&item.spent_on)
-                .bind(index as i64)
-                .execute(&mut *tx)
-                .await?;
-            }
+            // A missing or unmapped label imports as uncategorized instead of losing the row.
+            let cat_id: Option<i64> = item
+                .category_label
+                .as_ref()
+                .and_then(|label| category_map.get(label).copied());
+            sqlx::query(
+                "INSERT INTO items (month_id, category_id, description, amount, spent_on, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(month_id)
+            .bind(cat_id)
+            .bind(&item.description)
+            .bind(item.amount)
+            .bind(&item.spent_on)
+            .bind(index as i64)
+            .execute(&mut *tx)
+            .await?;
         }
     }
 

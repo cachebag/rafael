@@ -162,7 +162,7 @@ export const api = {
     list: (monthId: number) => request<ItemWithCategory[]>(`/months/${monthId}/items`),
     create: (
       monthId: number,
-      data: { category_id: number; description: string; amount: number; spent_on: string; savings_destination?: string }
+      data: { category_id?: number; description: string; amount: number; spent_on: string; savings_destination?: string }
     ) =>
       request<Item>(`/months/${monthId}/items`, {
         method: "POST",
@@ -325,7 +325,7 @@ export interface UserExport {
     is_closed: boolean;
     income_entries: { label: string; amount: number; paid_on?: string | null }[];
     budgets: { category_label: string; allocated_amount: number }[];
-    items: { category_label: string; description: string; amount: number; spent_on: string }[];
+    items: { category_label: string | null; description: string; amount: number; spent_on: string }[];
   }[];
 }
 
@@ -388,7 +388,7 @@ export interface IncomeEntry {
 export interface Item {
   id: number;
   month_id: number;
-  category_id: number;
+  category_id: number | null;
   description: string;
   amount: number;
   spent_on: string;
@@ -396,8 +396,8 @@ export interface Item {
 }
 
 export interface ItemWithCategory extends Item {
-  category_label: string;
-  category_color: string;
+  category_label: string | null;
+  category_color: string | null;
 }
 
 export interface MonthlySavings {
