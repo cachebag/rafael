@@ -6,7 +6,7 @@ use std::{
 
 use aes_gcm::{
     Aes256Gcm, Nonce,
-    aead::{Aead, AeadCore, KeyInit, OsRng},
+    aead::{Aead, Generate, KeyInit},
 };
 use anyhow::{Context, bail};
 use chrono::Utc;
@@ -302,7 +302,9 @@ async fn write_obfuscated_conversation(
         .with_context(|| format!("failed to serialize conversation {}", conversation.id))?;
     let cipher = Aes256Gcm::new_from_slice(key)
         .map_err(|error| anyhow::anyhow!("invalid conversation obfuscation key: {error}"))?;
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    // aes-gcm 0.11 replaced `generate_nonce(&mut OsRng)` with the `Generate` trait, which
+    // draws from the OS RNG itself. Still a fresh random nonce per message.
+    let nonce = Nonce::generate();
     let ciphertext = cipher
         .encrypt(&nonce, plaintext.as_ref())
         .map_err(|error| anyhow::anyhow!("failed to encrypt conversation: {error}"))?;
