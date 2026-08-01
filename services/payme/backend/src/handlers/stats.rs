@@ -39,6 +39,7 @@ pub async fn get_stats(
     let mut monthly_trends: Vec<MonthlyStats> = vec![];
     let mut total_spending = 0.0;
     let mut total_income_all = 0.0;
+    let mut active_month_count = 0.0;
 
     for (month_id, year, month) in &months {
         let income: (f64,) = sqlx::query_as(
@@ -54,15 +55,24 @@ pub async fn get_stats(
                 .fetch_one(&pool)
                 .await?;
 
+        // Fixed expenses are per-month snapshots. The user-level `fixed_expenses` table is
+        // only a template for seeding new months and is empty for most accounts, so reading
+        // it here reported $0 fixed for every month and inflated net by the whole amount.
         let fixed: (f64,) = sqlx::query_as(
-            "SELECT COALESCE(SUM(amount), 0.0) FROM fixed_expenses WHERE user_id = ?",
+            "SELECT COALESCE(SUM(amount), 0.0) FROM monthly_fixed_expenses WHERE month_id = ?",
         )
-        .bind(claims.sub)
+        .bind(month_id)
         .fetch_one(&pool)
         .await?;
 
-        total_spending += spent.0;
-        total_income_all += income.0;
+        // Months a user merely clicked through in the navigator have nothing in them.
+        // Averaging over those drags every figure toward zero, so only months with something
+        // recorded count toward the averages.
+        if income.0 > 0.0 || spent.0 > 0.0 || fixed.0 > 0.0 {
+            total_spending += spent.0;
+            total_income_all += income.0;
+            active_month_count += 1.0;
+        }
 
         monthly_trends.push(MonthlyStats {
             year: *year,
@@ -74,14 +84,13 @@ pub async fn get_stats(
         });
     }
 
-    let month_count = months.len() as f64;
-    let average_monthly_spending = if month_count > 0.0 {
-        total_spending / month_count
+    let average_monthly_spending = if active_month_count > 0.0 {
+        total_spending / active_month_count
     } else {
         0.0
     };
-    let average_monthly_income = if month_count > 0.0 {
-        total_income_all / month_count
+    let average_monthly_income = if active_month_count > 0.0 {
+        total_income_all / active_month_count
     } else {
         0.0
     };

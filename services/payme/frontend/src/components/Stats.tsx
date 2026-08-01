@@ -112,18 +112,18 @@ export function Stats() {
                         }}
                       />
                       <Line
-                        type="monotone"
+                        type="linear"
                         dataKey="income"
                         stroke="#5a7d5a"
                         strokeWidth={2}
-                        dot={false}
+                        dot={{ r: 3 }}
                       />
                       <Line
-                        type="monotone"
+                        type="linear"
                         dataKey="spent"
                         stroke="#d4694a"
                         strokeWidth={2}
-                        dot={false}
+                        dot={{ r: 3 }}
                       />
                     </LineChart>
                   </ResponsiveContainer>
