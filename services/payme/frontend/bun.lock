@@ -25,7 +25,7 @@
         "eslint-plugin-react-refresh": "*",
         "globals": "*",
         "tailwindcss": "*",
-        "typescript": "*",
+        "typescript": "^6.0.3",
         "typescript-eslint": "*",
         "vite": "*",
       },
