@@ -1019,3 +1019,137 @@ async fn migrations_null_out_items_orphaned_by_old_hard_deletes() {
         .unwrap();
     assert_eq!(category_id, None, "orphaned reference is cleared");
 }
+
+#[tokio::test]
+async fn migrations_give_open_months_a_line_for_every_live_category() {
+    let (pool, claims) = setup().await;
+
+    // A month created before the category existed, plus a closed one.
+    let Json(open) = create_month(
+        st(pool.clone()),
+        ext(claims.clone()),
+        Json(payme::handlers::months::CreateMonthRequest {
+            year: 2026,
+            month: 8,
+        }),
+    )
+    .await
+    .unwrap();
+    let Json(closed) = create_month(
+        st(pool.clone()),
+        ext(claims.clone()),
+        Json(payme::handlers::months::CreateMonthRequest {
+            year: 2026,
+            month: 9,
+        }),
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE months SET is_closed = 1 WHERE id = ?")
+        .bind(closed.month.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Created without naming a month, so it seeds nothing on its own.
+    let Json(cat) = create_category(
+        st(pool.clone()),
+        ext(claims.clone()),
+        Json(CreateCategory {
+            label: "Travel".to_string(),
+            default_amount: 250.0,
+            color: None,
+            month_id: None,
+        }),
+    )
+    .await
+    .unwrap();
+
+    let before: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM monthly_budgets WHERE month_id = ? AND category_id = ?",
+    )
+    .bind(open.month.id)
+    .bind(cat.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(before, 0, "the open month starts out missing the category");
+
+    run_migrations(&pool).await.unwrap();
+
+    let allocated: Option<f64> = sqlx::query_scalar(
+        "SELECT allocated_amount FROM monthly_budgets WHERE month_id = ? AND category_id = ?",
+    )
+    .bind(open.month.id)
+    .bind(cat.id)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        allocated,
+        Some(250.0),
+        "the open month gains a line at the category's default"
+    );
+
+    let closed_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM monthly_budgets WHERE month_id = ? AND category_id = ?",
+    )
+    .bind(closed.month.id)
+    .bind(cat.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(closed_count, 0, "closed months stay as they were closed");
+}
+
+#[tokio::test]
+async fn migrations_do_not_resurrect_a_category_removed_from_a_month() {
+    let (pool, claims) = setup().await;
+
+    let Json(cat) = create_category(
+        st(pool.clone()),
+        ext(claims.clone()),
+        Json(CreateCategory {
+            label: "Dining".to_string(),
+            default_amount: 100.0,
+            color: None,
+            month_id: None,
+        }),
+    )
+    .await
+    .unwrap();
+
+    let Json(month) = create_month(
+        st(pool.clone()),
+        ext(claims.clone()),
+        Json(payme::handlers::months::CreateMonthRequest {
+            year: 2026,
+            month: 8,
+        }),
+    )
+    .await
+    .unwrap();
+
+    delete_month_category(
+        st(pool.clone()),
+        ext(claims.clone()),
+        Path((month.month.id, cat.id)),
+    )
+    .await
+    .unwrap();
+
+    run_migrations(&pool).await.unwrap();
+
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM monthly_budgets WHERE month_id = ? AND category_id = ?",
+    )
+    .bind(month.month.id)
+    .bind(cat.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        count, 0,
+        "an archived category must not come back on restart"
+    );
+}

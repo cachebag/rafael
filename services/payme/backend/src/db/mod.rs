@@ -463,5 +463,21 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await
     .ok();
 
+    // A month only seeds the categories that existed when it was created, so a category added
+    // afterwards (or created without naming a month) leaves already-open months missing a
+    // budget line for it. Give every open month a line for every live category; closed months
+    // are settled history and keep whatever they were closed with.
+    sqlx::query(
+        r#"
+        INSERT OR IGNORE INTO monthly_budgets (month_id, category_id, allocated_amount)
+        SELECT m.id, bc.id, bc.default_amount
+        FROM months m
+        JOIN budget_categories bc ON bc.user_id = m.user_id AND bc.archived_at IS NULL
+        WHERE m.is_closed = 0
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
