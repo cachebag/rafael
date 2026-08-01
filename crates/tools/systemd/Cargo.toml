@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
 shell = { path = "../shell" }
-thiserror = "2.0.18"
+thiserror = "2.0.19"
