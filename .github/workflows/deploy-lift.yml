@@ -60,6 +60,13 @@ jobs:
           git fetch origin master
           git reset --hard origin/master
 
+          # first run after the submodule conversion: clear vendored leftovers
+          if [ -d services/payme ] && [ ! -e services/payme/.git ]; then
+            rm -rf services/payme
+          fi
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
           cd services/lift/frontend
           bun install --frozen-lockfile
           bun run build

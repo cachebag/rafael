@@ -1,0 +1,3 @@
+[submodule "services/payme"]
+	path = services/payme
+	url = https://github.com/cachebag/payme.git
