@@ -69,7 +69,11 @@ jobs:
             rm -rf services/payme
           fi
           git submodule sync --recursive
-          git submodule update --init --recursive
+          # The build writes inside the submodule (dist/, tsbuildinfo), and a dirty
+          # working tree makes the next checkout refuse to switch commits. Discard
+          # whatever the last deploy left behind before updating.
+          git submodule foreach --recursive 'git reset --hard && git clean -fdx -e node_modules'
+          git submodule update --init --recursive --force
 
           cd services/payme/frontend
           bun install --frozen-lockfile
