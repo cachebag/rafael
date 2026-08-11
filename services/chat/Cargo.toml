@@ -9,7 +9,7 @@ aes-gcm = "0.11.0"
 argon2 = "0.5.3"
 axum = { version = "0.8.9", features = ["macros"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
-clap = { version = "4.6.5", features = ["derive"] }
+clap = { version = "4.6.6", features = ["derive"] }
 client = { path = "../../crates/client" }
 common = { path = "../../crates/common" }
 config = { path = "../../crates/config" }
